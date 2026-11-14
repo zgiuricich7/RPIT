@@ -1,0 +1,20 @@
+import { createApp } from "./app.ts";
+import { config } from "./config.ts";
+import { openDatabase } from "./db/index.ts";
+
+const db = openDatabase(config.databasePath);
+const app = createApp(db, { staticDir: config.isProduction ? config.webDist : undefined });
+
+const server = app.listen(config.port, () => {
+  console.log(`Tasktree API listening on http://localhost:${config.port}`);
+  console.log(`Database: ${config.databasePath}`);
+});
+
+const shutdown = () => {
+  server.close(() => {
+    db.close();
+    process.exit(0);
+  });
+};
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
