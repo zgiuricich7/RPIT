@@ -15,6 +15,8 @@ const shutdown = () => {
     db.close();
     process.exit(0);
   });
+  // Open event streams (and idle keep-alive sockets) would otherwise keep close() waiting forever.
+  server.closeAllConnections();
 };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

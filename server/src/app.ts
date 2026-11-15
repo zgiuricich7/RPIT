@@ -6,8 +6,10 @@ import type { DB } from "./db/index.ts";
 import { toUser } from "./db/repo.ts";
 import { loadUser, requireUser } from "./auth.ts";
 import { errorHandler, HttpError } from "./http.ts";
+import { trackClientId } from "./events.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { projectActivityRoutes } from "./routes/activity.ts";
+import { projectEventRoutes } from "./routes/events.ts";
 import { memberRoutes } from "./routes/members.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
 import { projectRoutes } from "./routes/projects.ts";
@@ -25,6 +27,7 @@ export function createApp(db: DB, opts: AppOptions = {}) {
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
   app.use(loadUser(db));
+  app.use(trackClientId);
 
   const api = express.Router();
   api.get("/health", (_req, res) => {
@@ -45,6 +48,7 @@ export function createApp(db: DB, opts: AppOptions = {}) {
   api.use("/projects/:projectId/tests", tests.byProject);
   api.use("/projects/:projectId/members", memberRoutes(db));
   api.use("/projects/:projectId/activity", projectActivityRoutes(db));
+  api.use("/projects/:projectId/events", projectEventRoutes(db));
   api.use("/projects", projectRoutes(db));
   api.use("/tasks", tasks.byId);
   api.use("/tests", tests.byId);

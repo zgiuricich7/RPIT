@@ -19,17 +19,37 @@ export function openDatabase(file: string): DB {
   return db;
 }
 
+/** Callbacks queued by `afterCommit` while a transaction is open, per connection. */
+const pendingCommit = new WeakMap<DB, (() => void)[]>();
+
 /** Run `fn` inside a transaction; rolls back if it throws. */
 export function transaction<T>(db: DB, fn: () => T): T {
   db.exec("BEGIN");
+  const queued: (() => void)[] = [];
+  pendingCommit.set(db, queued);
+  let result: T;
   try {
-    const result = fn();
+    result = fn();
     db.exec("COMMIT");
-    return result;
   } catch (err) {
     db.exec("ROLLBACK");
     throw err;
+  } finally {
+    pendingCommit.delete(db);
   }
+  for (const cb of queued) cb();
+  return result;
+}
+
+/**
+ * Run `cb` once the current transaction commits (dropped if it rolls back),
+ * or immediately when no transaction is open. Used to publish real-time
+ * events only for changes that were actually saved.
+ */
+export function afterCommit(db: DB, cb: () => void) {
+  const queued = pendingCommit.get(db);
+  if (queued) queued.push(cb);
+  else cb();
 }
 
 export function migrate(db: DB) {

@@ -1,12 +1,16 @@
 import type { ActivityAction, ActivityEntity, FieldChange } from "@rpit/shared";
 import type { DB } from "./db/index.ts";
 import { newId } from "./db/index.ts";
+import { publishEvent } from "./events.ts";
 
 /**
  * Append-only audit log. Every project-scoped write calls `logActivity` in the
  * same transaction as the change, so a change is never committed without its
  * entry (and a failed change leaves none). Rows can't be updated or deleted:
  * triggers in migration 4 enforce that.
+ *
+ * Each entry also publishes a real-time ProjectEvent once the transaction
+ * commits, so every audited write reaches open clients (see events.ts).
  */
 
 type Value = FieldChange["from"];
@@ -62,4 +66,12 @@ export function logActivity(db: DB, a: ActivityInput) {
     `INSERT INTO activity (id, project_id, actor_id, entity, entity_id, task_id, action, label, diff)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(newId(), a.projectId, a.actorId, a.entity, a.entityId, a.taskId ?? null, a.action, a.label, JSON.stringify(a.diff));
+  publishEvent(db, {
+    projectId: a.projectId,
+    actorId: a.actorId,
+    entity: a.entity,
+    entityId: a.entityId,
+    taskId: a.taskId ?? null,
+    action: a.action,
+  });
 }

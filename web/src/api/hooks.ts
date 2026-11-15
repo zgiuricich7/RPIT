@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { hasRole, type ProjectRole } from "@rpit/shared";
 import type {
@@ -9,6 +10,7 @@ import type {
   Notification,
   NotificationList,
   Project,
+  ProjectEvent,
   ProjectInput,
   ProjectPatch,
   ProjectSummary,
@@ -22,7 +24,7 @@ import type {
   TestCasePatch,
   User,
 } from "@rpit/shared";
-import { api, ApiRequestError } from "./client.ts";
+import { api, ApiRequestError, CLIENT_ID } from "./client.ts";
 
 /**
  * Query keys. Every mutation invalidates the project-scoped keys it can
@@ -307,8 +309,9 @@ export function useDeleteTest(projectId: string) {
 
 // ---------- Notifications (in-app inbox) ----------
 /**
- * The inbox, newest first. There are no real-time updates, so this polls
- * while the app is open (and refetches on focus) to keep the badge current.
+ * The inbox, newest first. Polls while the app is open (and refetches on
+ * focus) to keep the badge current; changes in the open project also refresh
+ * it right away through useProjectEvents.
  */
 export function useNotifications(onlyUnread = false) {
   return useQuery({
@@ -359,3 +362,74 @@ export const useTaskActivity = (projectId: string, taskId: string, enabled = tru
 
 export const useTestActivity = (projectId: string, testId: string, enabled = true) =>
   useActivity(projectId, `/tests/${testId}/activity`, { test: testId }, enabled);
+
+// ---------- Real-time updates ----------
+/** Events arriving within this window are applied as one round of invalidations. */
+const EVENT_BATCH_MS = 150;
+/** Wait before reopening a stream the browser gave up on (e.g. server restart, lost access). */
+const RECONNECT_MS = 5_000;
+
+/**
+ * Subscribe to a project's server-sent event stream while mounted and
+ * invalidate the queries each change affects, so other people's edits show
+ * up without a refresh. Events from this tab's own writes aren't sent back.
+ * After a reconnect everything in the project is refetched, since events may
+ * have been missed while disconnected.
+ */
+export function useProjectEvents(projectId: string) {
+  const qc = useQueryClient();
+  useEffect(() => {
+    if (!projectId) return;
+    let source: EventSource | null = null;
+    let reconnect: ReturnType<typeof setTimeout> | undefined;
+    let flush: ReturnType<typeof setTimeout> | undefined;
+    let pending: ProjectEvent[] = [];
+    let connectedBefore = false;
+    let stopped = false;
+
+    const apply = () => {
+      flush = undefined;
+      const batch = pending;
+      pending = [];
+      invalidateProject(qc, projectId);
+      qc.invalidateQueries({ queryKey: keys.notifications });
+      const taskIds = new Set(batch.map((e) => e.taskId).filter((id): id is string => !!id));
+      for (const taskId of taskIds) qc.invalidateQueries({ queryKey: ["task", taskId] });
+      // Renames and role changes show up in the project list and switcher.
+      if (batch.some((e) => e.entity === "project" || e.entity === "member")) {
+        qc.invalidateQueries({ queryKey: keys.projects });
+      }
+    };
+
+    const connect = () => {
+      source = new EventSource(`/api/projects/${projectId}/events?clientId=${encodeURIComponent(CLIENT_ID)}`);
+      source.onopen = () => {
+        if (connectedBefore) invalidateProject(qc, projectId);
+        connectedBefore = true;
+      };
+      source.addEventListener("change", (msg) => {
+        pending.push(JSON.parse((msg as MessageEvent<string>).data) as ProjectEvent);
+        flush ??= setTimeout(apply, EVENT_BATCH_MS);
+      });
+      // Left, removed or project deleted: refreshing the project list lets ProjectLayout redirect.
+      source.addEventListener("removed", () => {
+        source?.close();
+        qc.invalidateQueries({ queryKey: keys.projects });
+      });
+      source.onerror = () => {
+        // EventSource retries dropped connections itself; it only stops on an error response.
+        if (source?.readyState !== EventSource.CLOSED || stopped) return;
+        qc.invalidateQueries({ queryKey: keys.projects });
+        reconnect = setTimeout(connect, RECONNECT_MS);
+      };
+    };
+    connect();
+
+    return () => {
+      stopped = true;
+      source?.close();
+      clearTimeout(reconnect);
+      clearTimeout(flush);
+    };
+  }, [qc, projectId]);
+}

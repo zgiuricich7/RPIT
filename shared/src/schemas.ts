@@ -304,6 +304,22 @@ export interface ActivityPage {
   nextCursor: string | null;
 }
 
+/**
+ * Sent on a project's event stream (`GET /api/projects/:id/events`, server-sent
+ * events) after a change to the project is committed: one per activity log
+ * entry. Clients use it to invalidate cached queries; it carries no data beyond
+ * what changed, so the client refetches through the normal, access-checked API.
+ */
+export interface ProjectEvent {
+  projectId: string;
+  actorId: string;
+  entity: ActivityEntity;
+  entityId: string;
+  /** For task and comment events: the task affected. */
+  taskId: string | null;
+  action: ActivityAction;
+}
+
 export interface ProjectSummary {
   projectId: string;
   taskCount: number;

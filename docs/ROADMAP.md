@@ -18,7 +18,10 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
 1.5 ~~**Edit comments**~~ Done: authors edit their comments ("edited" marker, logged, new mentions
     notified). All free text renders GitHub-flavoured Markdown with a formatting toolbar.
     Follow-up: comment edit history view, image uploads (see 2.6), and ignoring @-mentions inside code.
-1.6 **Real-time updates.** Server-sent events per project that invalidate TanStack Query keys.
+1.6 ~~**Real-time updates.**~~ Done: server-sent event stream per project, published from the activity
+    log after commit; the web invalidates the affected TanStack Query keys (own writes aren't echoed).
+    Follow-up: a per-user stream for notifications (replacing the inbox poll), presence ("who's viewing"),
+    and a shared broker if the API ever runs as more than one process (see 4.1).
 
 ## 2. Tasks
 

@@ -36,7 +36,10 @@ server/   Express 5 API on Node's built-in SQLite (node:sqlite, no native deps)
   src/access.ts       requireProjectRole middleware + project resolvers
   src/notify.ts       creates notifications (assignments, mentions, replies) and stores comment mentions
   src/activity.ts     logActivity + changes/snapshot diff helpers and the tracked fields per entity
+  src/events.ts       in-process EventHub: logActivity publishes a ProjectEvent after commit
+  src/routes/events.ts  GET /api/projects/:id/events — server-sent event stream per project
   test/api.test.ts    supertest against an in-memory DB
+  test/events.test.ts event stream tests (real listening server + fetch, since supertest buffers)
 web/      React 19 + Vite + TanStack Query + React Router 7
   src/api/client.ts   fetch wrapper (throws ApiRequestError with fieldErrors)
   src/api/hooks.ts    every query/mutation hook + query keys
@@ -112,6 +115,13 @@ docs/ROADMAP.md       prioritised backlog
   "Reply" means a new comment on a task you've commented on or are assigned to (comments are flat).
   `/api/notifications` is user-scoped (ownership check, not `requireProjectRole`); the web polls it every 30s
   under the `["notifications"]` key.
+- **Real-time updates come from the activity log.** `logActivity` queues a `ProjectEvent` with `afterCommit`
+  (`server/src/db/index.ts`), so only committed writes are published, and an unaudited write is also invisible
+  to other clients. Events carry ids only, never data: clients refetch through the normal access-checked API.
+  The web opens the stream in `ProjectLayout` via `useProjectEvents`, which batches events and invalidates
+  `["project", id]`, `["task", taskId]`, `["notifications"]` (and `["projects"]` for project/member events).
+  Each tab sends `X-RPIT-Client` (`CLIENT_ID` in `web/src/api/client.ts`) so its own writes aren't echoed back.
+  On member/project events the stream re-checks membership and sends `removed` + closes if access is gone.
 
 ## Adding a feature (checklist)
 
@@ -122,7 +132,9 @@ docs/ROADMAP.md       prioritised backlog
 
 - Invites only work for existing accounts (no pending invites or invite emails yet).
   `GET /api/users` still lists every user; it is only used to display assignee names.
-- No real-time updates; TanStack Query refetches on focus and after mutations (the inbox also polls).
+- Real-time events are in-process (one server). Multiple server processes would need a shared broker
+  (e.g. Postgres LISTEN/NOTIFY). Missed events aren't replayed; clients refetch the project on reconnect.
+  The inbox still polls for notifications from projects that aren't open.
 - Notifications are not emailed.
 - The activity log covers project-scoped actions only: sign-ins, sign-ups and inbox read state aren't logged.
   Rows for deleted projects are kept but no API exposes them.
