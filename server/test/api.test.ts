@@ -435,3 +435,132 @@ describe("mentions and notifications", () => {
     await request(createApp(db)).get("/api/notifications").expect(401);
   });
 });
+
+describe("activity log", () => {
+  type Entry = { entity: string; action: string; label: string; actorName: string | null; diff: Record<string, unknown> };
+  const feed = async (a: Awaited<ReturnType<typeof signUp>>, path: string) =>
+    (await a.get(path).expect(200)).body.items as Entry[];
+  const brief = (items: Entry[]) => items.map((e) => `${e.entity} ${e.action} ${e.label}`);
+
+  it("logs project creation, updates and deletion, and keeps entries after deletion", async () => {
+    const { db, agent, projectId } = ctx;
+    await agent.patch(`/api/projects/${projectId}`).send({ name: "Renamed" }).expect(200);
+    await agent.patch(`/api/projects/${projectId}`).send({ name: "Renamed" }).expect(200); // no change: not logged
+    const items = await feed(agent, `/api/projects/${projectId}/activity`);
+    expect(brief(items)).toEqual(["project updated Renamed", "member created Tester", "project created P1"]);
+    expect(items[0]!.diff).toEqual({ name: { from: "P1", to: "Renamed" } });
+    expect(items[0]!.actorName).toBe("Tester");
+
+    await agent.delete(`/api/projects/${projectId}`).expect(204);
+    const kept = db.prepare(`SELECT entity, action FROM activity WHERE project_id = ? ORDER BY rowid`).all(projectId);
+    expect(kept.at(-1)).toEqual({ entity: "project", action: "deleted" });
+  });
+
+  it("records task changes as field diffs and includes comments in the task's history", async () => {
+    const { agent, projectId, userId } = ctx;
+    const t = (await agent.post(`/api/projects/${projectId}/tasks`).send({ title: "A" })).body;
+    await agent.patch(`/api/tasks/${t.id}`).send({ status: "done", assigneeId: userId, title: "A" }).expect(200);
+    await agent.patch(`/api/tasks/${t.id}`).send({ status: "nope" }).expect(400); // failed writes leave no entry
+    await agent.patch(`/api/tasks/${t.id}`).send({ status: "done" }).expect(200); // no-op
+    const c = (await agent.post(`/api/tasks/${t.id}/comments`).send({ body: "Hello" })).body;
+    await agent.delete(`/api/comments/${c.id}`).expect(204);
+
+    const items = await feed(agent, `/api/tasks/${t.id}/activity`);
+    expect(brief(items)).toEqual(["comment deleted A", "comment created A", "task updated A", "task created A"]);
+    expect(items[0]!.diff).toEqual({ body: { from: "Hello", to: null } });
+    expect(items[2]!.diff).toEqual({ status: { from: "todo", to: "done" }, assigneeId: { from: null, to: userId } });
+    expect(items[3]!.diff).toMatchObject({ title: { from: null, to: "A" }, status: { from: null, to: "todo" } });
+  });
+
+  it("logs every task in a deleted subtree and the tests it unlinks", async () => {
+    const { agent, projectId } = ctx;
+    const a = (await agent.post(`/api/projects/${projectId}/tasks`).send({ title: "A" })).body;
+    const b = (await agent.post(`/api/projects/${projectId}/tasks`).send({ title: "B", parentId: a.id })).body;
+    const tc = (await agent.post(`/api/projects/${projectId}/tests`).send({ title: "T", taskId: b.id })).body;
+    await agent.delete(`/api/tasks/${a.id}`).expect(204);
+
+    const items = await feed(agent, `/api/projects/${projectId}/activity?limit=3`);
+    expect(brief(items)).toEqual(["test_case updated T", "task deleted B", "task deleted A"]);
+    expect(items[0]!.diff).toEqual({ taskId: { from: b.id, to: null } });
+    expect(items[1]!.diff).toMatchObject({ deletedWith: { from: "A", to: null }, parentId: { from: a.id, to: null } });
+    // The deleted task's history is gone from the API with the task, but the test's remains.
+    await agent.get(`/api/tasks/${a.id}/activity`).expect(404);
+    expect(brief(await feed(agent, `/api/tests/${tc.id}/activity`))).toEqual(["test_case updated T", "test_case created T"]);
+  });
+
+  it("logs test case changes and member changes, including unassignment on removal", async () => {
+    const { db, agent, projectId } = ctx;
+    const ed = await signUp(db, "Ed", "e@x.com");
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "e@x.com", role: "viewer" }).expect(201);
+    const edId = (await ed.get("/api/auth/me")).body.id;
+    await agent.patch(`/api/projects/${projectId}/members/${edId}`).send({ role: "editor" }).expect(200);
+    const tc = (await ed.post(`/api/projects/${projectId}/tests`).send({ title: "T", assigneeId: edId })).body;
+    await ed.patch(`/api/tests/${tc.id}`).send({ status: "passed" }).expect(200);
+    await ed.delete(`/api/projects/${projectId}/members/${edId}`).expect(204); // leaves
+
+    const items = await feed(agent, `/api/projects/${projectId}/activity?limit=6`);
+    expect(brief(items)).toEqual([
+      "test_case updated T",
+      "member deleted Ed",
+      "test_case updated T",
+      "test_case created T",
+      "member updated Ed",
+      "member created Ed",
+    ]);
+    expect(items.map((e) => e.actorName)).toEqual(["Ed", "Ed", "Ed", "Ed", "Tester", "Tester"]);
+    expect(items[0]!.diff).toEqual({ assigneeId: { from: edId, to: null } });
+    expect(items[2]!.diff).toEqual({ status: { from: "not_run", to: "passed" } });
+    expect(items[4]!.diff).toEqual({ role: { from: "viewer", to: "editor" } });
+
+    await agent.delete(`/api/tests/${tc.id}`).expect(204);
+    expect(brief(await feed(agent, `/api/projects/${projectId}/activity?limit=1`))).toEqual(["test_case deleted T"]);
+  });
+
+  it("is readable by viewers, hidden from non-members, and paginates", async () => {
+    const { db, agent, projectId } = ctx;
+    for (const title of ["1", "2", "3", "4"]) await agent.post(`/api/projects/${projectId}/tasks`).send({ title });
+    const viewer = await signUp(db, "Vee", "v@x.com");
+    const outsider = await signUp(db, "Out", "o@x.com");
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "v@x.com", role: "viewer" });
+    await outsider.get(`/api/projects/${projectId}/activity`).expect(404);
+
+    const p1 = (await viewer.get(`/api/projects/${projectId}/activity?limit=3`).expect(200)).body;
+    expect(brief(p1.items)).toEqual(["member created Vee", "task created 4", "task created 3"]);
+    const p2 = (await viewer.get(`/api/projects/${projectId}/activity?limit=3&before=${p1.nextCursor}`)).body;
+    expect(brief(p2.items)).toEqual(["task created 2", "task created 1", "member created Tester"]);
+    const p3 = (await viewer.get(`/api/projects/${projectId}/activity?limit=3&before=${p2.nextCursor}`)).body;
+    expect(brief(p3.items)).toEqual(["project created P1"]);
+    expect(p3.nextCursor).toBeNull();
+    await viewer.get(`/api/projects/${projectId}/activity?before=abc`).expect(400);
+  });
+
+  it("is append-only at the database level", async () => {
+    const { db, projectId } = ctx;
+    expect(() => db.exec(`UPDATE activity SET label = 'x'`)).toThrow(/append-only/);
+    expect(() => db.exec(`DELETE FROM activity`)).toThrow(/append-only/);
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM activity WHERE project_id = ?`).get(projectId)).toEqual({ n: 2 });
+  });
+});
+
+describe("partial updates", () => {
+  it("only change the fields that are sent", async () => {
+    const { agent, projectId, userId } = ctx;
+    const parent = (await agent.post(`/api/projects/${projectId}/tasks`).send({ title: "P" })).body;
+    const t = (await agent
+      .post(`/api/projects/${projectId}/tasks`)
+      .send({ title: "A", description: "D", priority: "high", assigneeId: userId, parentId: parent.id })).body;
+    // What a board drag sends.
+    const moved = (await agent.patch(`/api/tasks/${t.id}`).send({ status: "done" }).expect(200)).body;
+    expect(moved).toMatchObject({ status: "done", description: "D", priority: "high", assigneeId: userId, parentId: parent.id });
+
+    const tc = (await agent
+      .post(`/api/projects/${projectId}/tests`)
+      .send({ title: "T", taskId: t.id, assigneeId: userId, steps: "S", notes: "N" })).body;
+    const ran = (await agent.patch(`/api/tests/${tc.id}`).send({ status: "passed" }).expect(200)).body;
+    expect(ran).toMatchObject({ status: "passed", taskId: t.id, assigneeId: userId, steps: "S", notes: "N" });
+
+    await agent.patch(`/api/projects/${projectId}`).send({ description: "About" }).expect(200);
+    const p = (await agent.patch(`/api/projects/${projectId}`).send({ name: "New" }).expect(200)).body;
+    expect(p).toMatchObject({ name: "New", description: "About" });
+  });
+});

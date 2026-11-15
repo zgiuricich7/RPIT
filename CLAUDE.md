@@ -2,7 +2,7 @@
 
 Project management web app: projects contain infinitely nested tasks (list tree + Kanban board),
 threaded comments on tasks (with @-mentions), test cases that can be linked to tasks, assigned and tracked,
-and an in-app inbox of notifications.
+an in-app inbox of notifications, and an append-only activity (audit) log.
 Each project has an overview dashboard summarising completion and test status.
 
 ## Commands
@@ -34,6 +34,7 @@ server/   Express 5 API on Node's built-in SQLite (node:sqlite, no native deps)
   src/auth.ts         bcrypt passwords, opaque session id in an httpOnly cookie
   src/access.ts       requireProjectRole middleware + project resolvers
   src/notify.ts       creates notifications (assignments, mentions, replies) and stores comment mentions
+  src/activity.ts     logActivity + changes/snapshot diff helpers and the tracked fields per entity
   test/api.test.ts    supertest against an in-memory DB
 web/      React 19 + Vite + TanStack Query + React Router 7
   src/api/client.ts   fetch wrapper (throws ApiRequestError with fieldErrors)
@@ -41,6 +42,7 @@ web/      React 19 + Vite + TanStack Query + React Router 7
   src/components/dialogs.tsx  URL-driven task/test dialogs (?task=<id>, ?test=<id>) + comments UI
   src/components/mentions.tsx  highlighted comment body + @-mention autocomplete textarea
   src/components/TopBar.tsx    header with project switcher and inbox badge
+  src/components/activity.tsx  ActivityFeed: renders log entries as sentences + field changes
   src/pages/          Overview, Tasks (List + Board), Tests, Members, Inbox, Auth
   src/styles.css      design tokens (light/dark) and all styles; plain CSS, no framework
 docs/ROADMAP.md       prioritised backlog
@@ -60,12 +62,17 @@ docs/ROADMAP.md       prioritised backlog
 - `notifications(user_id, actor_id, project_id, kind, task_id, test_case_id, comment_id, read_at)` — one row
   per recipient; `kind` is `task_assigned` / `test_assigned` / `mention` / `reply` (CHECK + `NotificationKind`).
   Cascades from the task, test case or comment it points at; removed when the recipient leaves the project.
+- `activity(project_id, actor_id, entity, entity_id, task_id, action, label, diff, created_at)` — the audit log.
+  **No foreign keys** on project/entity/task ids so entries outlive what they describe; `label` snapshots the
+  name at the time; `diff` is JSON `{ field: { from, to } }`. Triggers make it append-only (UPDATE/DELETE abort).
 - Statuses and priorities are constrained by `CHECK` in SQL **and** by zod enums in `shared`. Change both together.
 
 ## Conventions
 
 - **Schemas live in `shared/src/schemas.ts`.** Add/modify request bodies there first; the server
   validates with `parseBody(Schema, req.body)` and the web app uses the inferred types.
+- **Patch schemas must not have defaults.** Don't write `Input.partial()` when `Input` uses `.default()`:
+  zod still applies the defaults, which resets every field the client didn't send.
 - **API is camelCase, DB is snake_case.** All translation happens in `server/src/db/repo.ts` mappers.
 - **Migrations are append-only.** Never edit an existing entry in `migrations.ts`; add a new one.
 - **Errors:** throw `HttpError(status, message)` (or `notFound("Thing")`). Express 5 forwards async
@@ -88,6 +95,11 @@ docs/ROADMAP.md       prioritised backlog
 - On the web, `useProjectRole(projectId)` / `project.role` only hide controls; the server is the authority.
 - **Mentions** are `@` + a member's full name, parsed by `findMentions` in `shared/src/mentions.ts`. The server
   uses it to store mentions; the web uses it with the stored `comment.mentions` to highlight, so both agree.
+- **Every project-scoped write is audited.** Call `logActivity` from `server/src/activity.ts` inside the same
+  `transaction` as the change (use `snapshot` for create/delete, `changes` for updates; empty update diffs are
+  skipped). Log side effects too (cascaded subtask deletes, unlinked tests, unassignments). New tracked fields
+  go in `TASK_FIELDS` / `TEST_FIELDS` / `PROJECT_FIELDS`, plus a label in `web/src/components/activity.tsx`.
+  Adding an entity or action type needs a new migration that recreates the CHECK.
 - **Notifications are in-app only** (no email). Create them with `notify` / `notifyAssignment` /
   `recordCommentActivity` from `server/src/notify.ts` after a write; they skip the actor and non-members.
   "Reply" means a new comment on a task you've commented on or are assigned to (comments are flat).
@@ -105,5 +117,7 @@ docs/ROADMAP.md       prioritised backlog
   `GET /api/users` still lists every user; it is only used to display assignee names.
 - No real-time updates; TanStack Query refetches on focus and after mutations (the inbox also polls).
 - Notifications are not emailed.
+- The activity log covers project-scoped actions only: sign-ins, sign-ups and inbox read state aren't logged.
+  Rows for deleted projects are kept but no API exposes them.
 - Board drag-and-drop uses native HTML5 DnD (no touch support, no reordering within a column).
 - SQLite single file; fine for a team on one server. Postgres is on the roadmap.

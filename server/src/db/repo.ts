@@ -1,4 +1,5 @@
 import type {
+  Activity,
   Comment,
   CommentMention,
   Member,
@@ -70,6 +71,25 @@ export const toComment = (r: Row): Comment => ({
   mentions: r.mentions_json ? (JSON.parse(r.mentions_json as string) as CommentMention[]) : [],
   createdAt: r.created_at as string,
 });
+
+export const toActivity = (r: Row): Activity => ({
+  id: r.id as string,
+  projectId: r.project_id as string,
+  actorId: (r.actor_id as string | null) ?? null,
+  actorName: (r.actor_name as string | null) ?? null,
+  entity: r.entity as Activity["entity"],
+  entityId: r.entity_id as string,
+  taskId: (r.task_id as string | null) ?? null,
+  action: r.action as Activity["action"],
+  label: r.label as string,
+  diff: JSON.parse(r.diff as string) as Activity["diff"],
+  createdAt: r.created_at as string,
+});
+
+/** Activity with the actor's name. Also selects rowid, which is the pagination cursor. */
+export const ACTIVITY_SELECT = `
+  SELECT a.rowid AS seq, a.*, u.name AS actor_name
+  FROM activity a LEFT JOIN users u ON u.id = a.actor_id`;
 
 export const toNotification = (r: Row): Notification => ({
   id: r.id as string,

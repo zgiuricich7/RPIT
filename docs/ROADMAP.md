@@ -12,8 +12,9 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
 1.3 ~~**Notifications.**~~ Done: in-app inbox for assignments, mentions and replies (polled every 30s).
     Follow-up: email digest (needs an email sender; see 4.3), per-user notification preferences,
     and pushing new notifications over 1.6's event stream instead of polling.
-1.4 **Activity log.** `activity(project_id, actor_id, entity, entity_id, action, diff, created_at)`
-    written from routes; show per task and a project feed on the overview.
+1.4 ~~**Activity log.**~~ Done: append-only audit log of every project-scoped write with field diffs;
+    project feed on the overview and history in task and test dialogs. Follow-up: log auth events
+    (sign-in, failed sign-in), an owner-only export (CSV/JSON), and a way to view deleted projects' logs.
 1.5 **Edit comments**, with an "edited" marker. Optionally Markdown rendering.
 1.6 **Real-time updates.** Server-sent events per project that invalidate TanStack Query keys.
 

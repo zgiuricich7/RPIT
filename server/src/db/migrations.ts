@@ -115,4 +115,33 @@ export const migrations: string[] = [
   );
   CREATE INDEX idx_notifications_user ON notifications(user_id, created_at);
   `,
+
+  /* 4: append-only activity (audit) log */ `
+  -- Deliberately no foreign keys on project_id, entity_id or task_id: entries must
+  -- survive deletion of the project, task, comment or test case they describe.
+  CREATE TABLE activity (
+    id         TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    actor_id   TEXT REFERENCES users(id) ON DELETE SET NULL,
+    entity     TEXT NOT NULL CHECK (entity IN ('project','member','task','comment','test_case')),
+    entity_id  TEXT NOT NULL,
+    task_id    TEXT,
+    action     TEXT NOT NULL CHECK (action IN ('created','updated','deleted')),
+    label      TEXT NOT NULL DEFAULT '',
+    diff       TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX idx_activity_project ON activity(project_id);
+  CREATE INDEX idx_activity_task ON activity(task_id);
+  CREATE INDEX idx_activity_entity ON activity(entity, entity_id);
+
+  -- Append-only. The only permitted update is the actor_id SET NULL done by the
+  -- foreign key if a user is ever deleted.
+  CREATE TRIGGER activity_no_update
+  BEFORE UPDATE OF id, project_id, entity, entity_id, task_id, action, label, diff, created_at ON activity
+  BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
+  CREATE TRIGGER activity_no_delete
+  BEFORE DELETE ON activity
+  BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
+  `,
 ];

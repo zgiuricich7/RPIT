@@ -14,6 +14,9 @@ and test case tracking — with a per-project overview dashboard.
   comments on a task you follow
 - **Test cases** with steps, expected result, notes, assignee, priority and a linked task;
   dashboard with pass rate and status filters
+- **Activity log**: every change to projects, members, tasks, comments and test cases is recorded
+  with who, when and what changed (before and after). Shown as a project feed and per-task/test history.
+  The log is append-only.
 - **Overview** per project: completion, task and test status breakdowns, items needing attention,
   recent comments, and a comparison across all projects
 - Email/password accounts with cookie sessions; light and dark themes; responsive layout
@@ -69,6 +72,7 @@ GET    /users
 GET    /projects                 POST /projects
 GET    /projects/:id             PATCH/DELETE /projects/:id
 GET    /projects/:id/summary     GET /projects/:id/comments/recent
+GET    /projects/:id/activity    GET /tasks/:id/activity       GET /tests/:id/activity   (?before=&limit=)
 GET    /projects/:id/members     POST /projects/:id/members   (invite by email)
 PATCH/DELETE /projects/:id/members/:userId
 GET    /projects/:id/tasks       POST /projects/:id/tasks

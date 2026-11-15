@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   PRIORITY_LABELS,
@@ -25,13 +25,16 @@ import {
   usePostComment,
   useMembers,
   useProjectRole,
+  useTaskActivity,
   useTasks,
+  useTestActivity,
   useTests,
   useUpdateProject,
   useUpdateTask,
   useUpdateTest,
 } from "../api/hooks.ts";
 import { formatDateTime } from "../lib/format.ts";
+import { ActivityFeed } from "./activity.tsx";
 import { CommentBody, MentionTextarea } from "./mentions.tsx";
 import { Modal, Options } from "./ui.tsx";
 
@@ -223,6 +226,11 @@ function TaskDialog(props: {
           <Discussion projectId={projectId} taskId={task.id} />
         </div>
       )}
+      {task && (
+        <div className="modal-body">
+          <History>{() => <TaskHistory projectId={projectId} taskId={task.id} />}</History>
+        </div>
+      )}
     </Modal>
   );
 }
@@ -310,6 +318,27 @@ function Discussion({ projectId, taskId }: { projectId: string; taskId: string }
       </form>
     </div>
   );
+}
+
+/** Collapsed by default; the log is only fetched once it's opened. */
+function History({ children }: { children: () => ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details className="history" onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary>History</summary>
+      {open && children()}
+    </details>
+  );
+}
+
+function TaskHistory({ projectId, taskId }: { projectId: string; taskId: string }) {
+  const query = useTaskActivity(projectId, taskId);
+  return <ActivityFeed projectId={projectId} scope="task" query={query} />;
+}
+
+function TestHistory({ projectId, testId }: { projectId: string; testId: string }) {
+  const query = useTestActivity(projectId, testId);
+  return <ActivityFeed projectId={projectId} scope="test" query={query} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -435,6 +464,11 @@ function TestDialog(props: { projectId: string; test: TestCase | null; tasks: Ta
           )}
         </div>
       </form>
+      {test && (
+        <div className="modal-body">
+          <History>{() => <TestHistory projectId={projectId} testId={test.id} />}</History>
+        </div>
+      )}
     </Modal>
   );
 }

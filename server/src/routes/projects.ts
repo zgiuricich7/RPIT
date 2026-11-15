@@ -6,6 +6,7 @@ import { getProjectForUser, PROJECT_SELECT, projectSummary, recentComments, toPr
 import { notFound, param, parseBody } from "../http.ts";
 import { currentUser } from "../auth.ts";
 import { requireProjectRole } from "../access.ts";
+import { changes, logActivity, PROJECT_FIELDS, snapshot } from "../activity.ts";
 
 export function projectRoutes(db: DB) {
   const r = Router();
@@ -15,6 +16,13 @@ export function projectRoutes(db: DB) {
     if (!p) throw notFound("Project");
     return p;
   };
+  const projectEntry = (id: string, actorId: string, label: string) => ({
+    projectId: id,
+    actorId,
+    entity: "project" as const,
+    entityId: id,
+    label,
+  });
 
   /** Only projects the user is a member of. */
   r.get("/", (req, res) => {
@@ -28,13 +36,27 @@ export function projectRoutes(db: DB) {
   /** The creator becomes the project's owner. */
   r.post("/", (req, res) => {
     const input = parseBody(ProjectInput, req.body);
-    const userId = currentUser(req).id;
+    const user = currentUser(req);
     const id = newId();
     transaction(db, () => {
       db.prepare(`INSERT INTO projects (id, name, description) VALUES (?, ?, ?)`).run(id, input.name, input.description);
-      db.prepare(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'owner')`).run(id, userId);
+      db.prepare(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'owner')`).run(id, user.id);
+      logActivity(db, {
+        ...projectEntry(id, user.id, input.name),
+        action: "created",
+        diff: snapshot(input, PROJECT_FIELDS, "created"),
+      });
+      logActivity(db, {
+        projectId: id,
+        actorId: user.id,
+        entity: "member",
+        entityId: user.id,
+        action: "created",
+        label: user.name,
+        diff: { role: { from: null, to: "owner" } },
+      });
     });
-    res.status(201).json(get(id, userId));
+    res.status(201).json(get(id, user.id));
   });
 
   r.get("/:projectId", can("viewer"), (req, res) => {
@@ -46,17 +68,28 @@ export function projectRoutes(db: DB) {
     const userId = currentUser(req).id;
     const cur = get(id, userId);
     const p = parseBody(ProjectPatch, req.body);
-    db.prepare(`UPDATE projects SET name = ?, description = ?, updated_at = ? WHERE id = ?`).run(
-      p.name ?? cur.name,
-      p.description ?? cur.description,
-      now(),
-      id,
-    );
+    const next = { name: p.name ?? cur.name, description: p.description ?? cur.description };
+    transaction(db, () => {
+      db.prepare(`UPDATE projects SET name = ?, description = ?, updated_at = ? WHERE id = ?`).run(
+        next.name,
+        next.description,
+        now(),
+        id,
+      );
+      logActivity(db, { ...projectEntry(id, userId, next.name), action: "updated", diff: changes(cur, next, PROJECT_FIELDS) });
+    });
     res.json(get(id, userId));
   });
 
+  /** The project's activity entries are kept (they have no foreign key), ending with this one. */
   r.delete("/:projectId", can("owner"), (req, res) => {
-    db.prepare(`DELETE FROM projects WHERE id = ?`).run(param(req, "projectId"));
+    const id = param(req, "projectId");
+    const userId = currentUser(req).id;
+    const cur = get(id, userId);
+    transaction(db, () => {
+      logActivity(db, { ...projectEntry(id, userId, cur.name), action: "deleted", diff: snapshot(cur, PROJECT_FIELDS, "deleted") });
+      db.prepare(`DELETE FROM projects WHERE id = ?`).run(id);
+    });
     res.status(204).end();
   });
 

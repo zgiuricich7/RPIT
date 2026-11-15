@@ -7,6 +7,7 @@ import { toUser } from "./db/repo.ts";
 import { loadUser, requireUser } from "./auth.ts";
 import { errorHandler, HttpError } from "./http.ts";
 import { authRoutes } from "./routes/auth.ts";
+import { projectActivityRoutes } from "./routes/activity.ts";
 import { memberRoutes } from "./routes/members.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
 import { projectRoutes } from "./routes/projects.ts";
@@ -43,6 +44,7 @@ export function createApp(db: DB, opts: AppOptions = {}) {
   api.use("/projects/:projectId/tasks", tasks.byProject);
   api.use("/projects/:projectId/tests", tests.byProject);
   api.use("/projects/:projectId/members", memberRoutes(db));
+  api.use("/projects/:projectId/activity", projectActivityRoutes(db));
   api.use("/projects", projectRoutes(db));
   api.use("/tasks", tasks.byId);
   api.use("/tests", tests.byId);

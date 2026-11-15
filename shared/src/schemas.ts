@@ -76,7 +76,13 @@ export const ProjectInput = z.object({
   name: z.string().trim().min(1, "Name is required").max(120),
   description: longText.default(""),
 });
-export const ProjectPatch = ProjectInput.partial();
+/**
+ * Patch schemas must not carry defaults: zod still applies `.default()` inside
+ * `.partial()`, which would silently reset every field the client left out.
+ */
+export const ProjectPatch = z
+  .object({ name: z.string().trim().min(1, "Name is required").max(120), description: longText })
+  .partial();
 export type ProjectInput = z.input<typeof ProjectInput>;
 export type ProjectPatch = z.infer<typeof ProjectPatch>;
 
@@ -99,7 +105,16 @@ export const TaskInput = z.object({
   assigneeId: nullableId.default(null),
   parentId: nullableId.default(null),
 });
-export const TaskPatch = TaskInput.partial();
+export const TaskPatch = z
+  .object({
+    title,
+    description: longText,
+    status: TaskStatus,
+    priority: Priority,
+    assigneeId: nullableId,
+    parentId: nullableId,
+  })
+  .partial();
 export type TaskInput = z.input<typeof TaskInput>;
 export type TaskPatch = z.infer<typeof TaskPatch>;
 
@@ -116,6 +131,14 @@ export type NotificationKind = z.infer<typeof NotificationKind>;
 export const NotificationPatch = z.object({ read: z.boolean() });
 export type NotificationPatch = z.infer<typeof NotificationPatch>;
 
+// ---------- Activity log ----------
+export const ACTIVITY_ENTITIES = ["project", "member", "task", "comment", "test_case"] as const;
+export const ACTIVITY_ACTIONS = ["created", "updated", "deleted"] as const;
+export const ActivityEntity = z.enum(ACTIVITY_ENTITIES);
+export const ActivityAction = z.enum(ACTIVITY_ACTIONS);
+export type ActivityEntity = z.infer<typeof ActivityEntity>;
+export type ActivityAction = z.infer<typeof ActivityAction>;
+
 // ---------- Test cases ----------
 export const TestCaseInput = z.object({
   title,
@@ -127,7 +150,18 @@ export const TestCaseInput = z.object({
   expected: longText.default(""),
   notes: longText.default(""),
 });
-export const TestCasePatch = TestCaseInput.partial();
+export const TestCasePatch = z
+  .object({
+    title,
+    status: TestStatus,
+    priority: Priority,
+    assigneeId: nullableId,
+    taskId: nullableId,
+    steps: longText,
+    expected: longText,
+    notes: longText,
+  })
+  .partial();
 export type TestCaseInput = z.input<typeof TestCaseInput>;
 export type TestCasePatch = z.infer<typeof TestCasePatch>;
 
@@ -229,6 +263,39 @@ export interface Notification {
 export interface NotificationList {
   items: Notification[];
   unreadCount: number;
+}
+
+/** One changed field. `from` is null on create, `to` is null on delete. */
+export interface FieldChange {
+  from: string | number | boolean | null;
+  to: string | number | boolean | null;
+}
+
+/**
+ * One entry in the append-only audit log. Entries outlive the thing they
+ * describe, so `label` keeps its name (task or test title, member name,
+ * project name) as it was at the time.
+ */
+export interface Activity {
+  id: string;
+  projectId: string;
+  actorId: string | null;
+  actorName: string | null;
+  entity: ActivityEntity;
+  entityId: string;
+  /** For task and comment entries: the task, so a task's history includes its comments. */
+  taskId: string | null;
+  action: ActivityAction;
+  label: string;
+  /** Field-level changes. Create and delete entries record every tracked field. */
+  diff: Record<string, FieldChange>;
+  createdAt: string;
+}
+
+export interface ActivityPage {
+  items: Activity[];
+  /** Pass as `?before=` to load older entries; null when there are none. */
+  nextCursor: string | null;
 }
 
 export interface ProjectSummary {

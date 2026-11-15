@@ -12,6 +12,7 @@ import {
 } from "@rpit/shared";
 import {
   useDeleteProject,
+  useProjectActivity,
   useProjectSummary,
   useProjects,
   useRecentComments,
@@ -19,6 +20,7 @@ import {
   useTests,
 } from "../api/hooks.ts";
 import { ProjectDialog, useDialogs } from "../components/dialogs.tsx";
+import { ActivityFeed } from "../components/activity.tsx";
 import { CommentBody } from "../components/mentions.tsx";
 import { Meter, Stack, TaskStatusPill, TestStatusPill } from "../components/ui.tsx";
 import { formatDateTime } from "../lib/format.ts";
@@ -41,6 +43,7 @@ export function OverviewPage() {
   const recent = useRecentComments(project.id).data ?? [];
   const projects = useProjects().data ?? [];
   const del = useDeleteProject();
+  const activity = useProjectActivity(project.id);
   const [editing, setEditing] = useState(false);
 
   const top = buildTree(tasks);
@@ -176,6 +179,11 @@ export function OverviewPage() {
             ))}
           </div>
         </div>
+      </div>
+
+      <div className="panel">
+        <h3>Activity</h3>
+        <ActivityFeed projectId={project.id} scope="project" query={activity} />
       </div>
 
       <h3 style={{ margin: "20px 0 10px", fontSize: 14 }}>All projects</h3>

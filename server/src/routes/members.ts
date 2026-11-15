@@ -6,6 +6,7 @@ import { getMember, MEMBER_SELECT, toMember } from "../db/repo.ts";
 import { HttpError, notFound, param, parseBody } from "../http.ts";
 import { currentUser } from "../auth.ts";
 import { currentProject, requireProjectRole } from "../access.ts";
+import { logActivity } from "../activity.ts";
 
 /** Mounted at /api/projects/:projectId/members */
 export function memberRoutes(db: DB) {
@@ -50,12 +51,25 @@ export function memberRoutes(db: DB) {
       const msg = "This person is already a member of the project";
       throw new HttpError(409, msg, { email: [msg] });
     }
-    db.prepare(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, ?)`).run(
-      projectId,
-      user.id,
-      input.role,
-    );
-    res.status(201).json(requireMember(projectId, user.id));
+    const member = transaction(db, () => {
+      db.prepare(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, ?)`).run(
+        projectId,
+        user.id,
+        input.role,
+      );
+      const m = requireMember(projectId, user.id);
+      logActivity(db, {
+        projectId,
+        actorId: currentUser(req).id,
+        entity: "member",
+        entityId: m.userId,
+        action: "created",
+        label: m.name,
+        diff: { role: { from: null, to: m.role } },
+      });
+      return m;
+    });
+    res.status(201).json(member);
   });
 
   r.patch("/:userId", can("owner"), (req, res) => {
@@ -64,7 +78,18 @@ export function memberRoutes(db: DB) {
     const cur = requireMember(projectId, userId);
     const { role } = parseBody(MemberPatch, req.body);
     guardLastOwner(projectId, cur.role, role);
-    db.prepare(`UPDATE project_members SET role = ? WHERE project_id = ? AND user_id = ?`).run(role, projectId, userId);
+    transaction(db, () => {
+      db.prepare(`UPDATE project_members SET role = ? WHERE project_id = ? AND user_id = ?`).run(role, projectId, userId);
+      logActivity(db, {
+        projectId,
+        actorId: currentUser(req).id,
+        entity: "member",
+        entityId: userId,
+        action: "updated",
+        label: cur.name,
+        diff: role === cur.role ? {} : { role: { from: cur.role, to: role } },
+      });
+    });
     res.json(requireMember(projectId, userId));
   });
 
@@ -72,18 +97,45 @@ export function memberRoutes(db: DB) {
   r.delete("/:userId", can("viewer"), (req, res) => {
     const projectId = param(req, "projectId");
     const userId = param(req, "userId");
-    if (userId !== currentUser(req).id && currentProject(req).role !== "owner") {
+    const actorId = currentUser(req).id;
+    if (userId !== actorId && currentProject(req).role !== "owner") {
       throw new HttpError(403, "You need owner access to do this");
     }
     const cur = requireMember(projectId, userId);
     guardLastOwner(projectId, cur.role, null);
     transaction(db, () => {
-      // Former members can't be assignees, so release their work in this project.
-      db.prepare(`UPDATE tasks SET assignee_id = NULL WHERE project_id = ? AND assignee_id = ?`).run(projectId, userId);
-      db.prepare(`UPDATE test_cases SET assignee_id = NULL WHERE project_id = ? AND assignee_id = ?`).run(
+      // Leaving is logged as a removal where the actor is the member.
+      logActivity(db, {
         projectId,
-        userId,
-      );
+        actorId,
+        entity: "member",
+        entityId: userId,
+        action: "deleted",
+        label: cur.name,
+        diff: { role: { from: cur.role, to: null } },
+      });
+      // Former members can't be assignees, so release (and log) their work in this project.
+      for (const table of ["tasks", "test_cases"] as const) {
+        const rows = db
+          .prepare(`SELECT id, title FROM ${table} WHERE project_id = ? AND assignee_id = ?`)
+          .all(projectId, userId) as { id: string; title: string }[];
+        for (const row of rows) {
+          logActivity(db, {
+            projectId,
+            actorId,
+            entity: table === "tasks" ? "task" : "test_case",
+            entityId: row.id,
+            taskId: table === "tasks" ? row.id : null,
+            action: "updated",
+            label: row.title,
+            diff: { assigneeId: { from: userId, to: null } },
+          });
+        }
+        db.prepare(`UPDATE ${table} SET assignee_id = NULL WHERE project_id = ? AND assignee_id = ?`).run(
+          projectId,
+          userId,
+        );
+      }
       // Their inbox shouldn't keep links into a project they can no longer open.
       db.prepare(`DELETE FROM notifications WHERE project_id = ? AND user_id = ?`).run(projectId, userId);
       db.prepare(`DELETE FROM project_members WHERE project_id = ? AND user_id = ?`).run(projectId, userId);

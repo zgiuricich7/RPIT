@@ -1,6 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { hasRole, type ProjectRole } from "@rpit/shared";
 import type {
+  ActivityPage,
   Comment,
   LoginInput,
   Member,
@@ -37,6 +38,9 @@ export const keys = {
   summary: (projectId: string) => ["project", projectId, "summary"] as const,
   recent: (projectId: string) => ["project", projectId, "recent-comments"] as const,
   members: (projectId: string) => ["project", projectId, "members"] as const,
+  /** Under the project prefix, so every project mutation refreshes the logs too. */
+  activity: (projectId: string, scope?: { task?: string; test?: string }) =>
+    ["project", projectId, "activity", scope ?? {}] as const,
   comments: (taskId: string) => ["task", taskId, "comments"] as const,
   /** The signed-in user's inbox; not project-scoped. */
   notifications: ["notifications"] as const,
@@ -121,7 +125,10 @@ export function useUpdateProject() {
   return useMutation({
     mutationFn: ({ id, ...patch }: ProjectPatch & { id: string }) =>
       api<Project>(`/projects/${id}`, { method: "PATCH", body: patch }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.projects }),
+    onSuccess: (_p, { id }) => {
+      qc.invalidateQueries({ queryKey: keys.projects });
+      invalidateProject(qc, id);
+    },
   });
 }
 
@@ -318,3 +325,25 @@ export function useMarkAllNotificationsRead() {
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.notifications }),
   });
 }
+
+// ---------- Activity log ----------
+function useActivity(projectId: string, path: string, scope: { task?: string; test?: string } | undefined, enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: keys.activity(projectId, scope),
+    queryFn: ({ pageParam }) =>
+      api<ActivityPage>(`${path}${pageParam ? `?before=${encodeURIComponent(pageParam)}` : ""}`),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor,
+    enabled,
+  });
+}
+
+export const useProjectActivity = (projectId: string) =>
+  useActivity(projectId, `/projects/${projectId}/activity`, undefined, true);
+
+/** A task's own changes and its comments. Pass `enabled: false` until the history is shown. */
+export const useTaskActivity = (projectId: string, taskId: string, enabled = true) =>
+  useActivity(projectId, `/tasks/${taskId}/activity`, { task: taskId }, enabled);
+
+export const useTestActivity = (projectId: string, testId: string, enabled = true) =>
+  useActivity(projectId, `/tests/${testId}/activity`, { test: testId }, enabled);
