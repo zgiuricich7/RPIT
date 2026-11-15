@@ -4,42 +4,39 @@ import type { DB } from "../db/index.ts";
 import { newId, now } from "../db/index.ts";
 import { getTask, toTestCase } from "../db/repo.ts";
 import { HttpError, notFound, param, parseBody } from "../http.ts";
+import { byTestCase, requireProjectRole } from "../access.ts";
+import { checkAssignee } from "./tasks.ts";
 
 export function testCaseRoutes(db: DB) {
   /** Mounted at /api/projects/:projectId/tests */
   const byProject = Router({ mergeParams: true });
   /** Mounted at /api/tests */
   const byId = Router();
+  const can = requireProjectRole(db);
 
   const get = (id: string) => {
     const row = db.prepare(`SELECT * FROM test_cases WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
     if (!row) throw notFound("Test case");
     return toTestCase(row);
   };
-  const checkRefs = (projectId: string, taskId?: string | null, assigneeId?: string | null) => {
-    if (taskId) {
-      const t = getTask(db, taskId);
-      if (!t || t.projectId !== projectId) throw new HttpError(400, "Linked task must be in the same project");
-    }
-    if (assigneeId && !db.prepare(`SELECT 1 FROM users WHERE id = ?`).get(assigneeId)) {
-      throw new HttpError(400, "Assignee does not exist");
-    }
+  const checkTask = (projectId: string, taskId?: string | null) => {
+    if (!taskId) return;
+    const t = getTask(db, taskId);
+    if (!t || t.projectId !== projectId) throw new HttpError(400, "Linked task must be in the same project");
   };
 
-  byProject.get("/", (req, res) => {
-    const projectId = param(req, "projectId");
-    if (!db.prepare(`SELECT 1 FROM projects WHERE id = ?`).get(projectId)) throw notFound("Project");
+  byProject.get("/", can("viewer"), (req, res) => {
     const rows = db
       .prepare(`SELECT * FROM test_cases WHERE project_id = ? ORDER BY created_at`)
-      .all(projectId) as Record<string, unknown>[];
+      .all(param(req, "projectId")) as Record<string, unknown>[];
     res.json(rows.map(toTestCase));
   });
 
-  byProject.post("/", (req, res) => {
+  byProject.post("/", can("editor"), (req, res) => {
     const projectId = param(req, "projectId");
-    if (!db.prepare(`SELECT 1 FROM projects WHERE id = ?`).get(projectId)) throw notFound("Project");
     const input = parseBody(TestCaseInput, req.body);
-    checkRefs(projectId, input.taskId, input.assigneeId);
+    checkTask(projectId, input.taskId);
+    checkAssignee(db, projectId, input.assigneeId);
     const id = newId();
     db.prepare(
       `INSERT INTO test_cases (id, project_id, task_id, title, status, priority, assignee_id, steps, expected, notes)
@@ -59,15 +56,16 @@ export function testCaseRoutes(db: DB) {
     res.status(201).json(get(id));
   });
 
-  byId.get("/:testId", (req, res) => {
+  byId.get("/:testId", can("viewer", byTestCase), (req, res) => {
     res.json(get(param(req, "testId")));
   });
 
-  byId.patch("/:testId", (req, res) => {
+  byId.patch("/:testId", can("editor", byTestCase), (req, res) => {
     const id = param(req, "testId");
     const cur = get(id);
     const p = parseBody(TestCasePatch, req.body);
-    checkRefs(cur.projectId, p.taskId, p.assigneeId);
+    checkTask(cur.projectId, p.taskId);
+    if (p.assigneeId !== undefined && p.assigneeId !== cur.assigneeId) checkAssignee(db, cur.projectId, p.assigneeId);
     const m = { ...cur, ...p };
     db.prepare(
       `UPDATE test_cases SET task_id = ?, title = ?, status = ?, priority = ?, assignee_id = ?,
@@ -76,10 +74,8 @@ export function testCaseRoutes(db: DB) {
     res.json(get(id));
   });
 
-  byId.delete("/:testId", (req, res) => {
-    const id = param(req, "testId");
-    get(id);
-    db.prepare(`DELETE FROM test_cases WHERE id = ?`).run(id);
+  byId.delete("/:testId", can("editor", byTestCase), (req, res) => {
+    db.prepare(`DELETE FROM test_cases WHERE id = ?`).run(param(req, "testId"));
     res.status(204).end();
   });
 

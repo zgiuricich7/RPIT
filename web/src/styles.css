@@ -204,3 +204,12 @@ dialog.modal::backdrop { background: rgba(0, 0, 0, 0.45); }
   .board { grid-template-columns: repeat(4, 82vw); }
   .two { grid-template-columns: 1fr; }
 }
+
+/* ---------- Members ---------- */
+.panel.invite { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-bottom: 14px; }
+.panel.invite .field { flex: 1 1 220px; }
+.panel.invite .field:nth-of-type(2) { flex: 0 1 160px; }
+.panel.invite .form-error { flex-basis: 100%; }
+.role-help { margin: 14px 0 0; padding-left: 18px; font-size: 13px; display: grid; gap: 2px; }
+/* Groups dialog fields so viewers get them all disabled at once. */
+fieldset.fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 12px; }

@@ -70,12 +70,16 @@ export function OverviewPage() {
         <h2>{project.name}</h2>
         <span className="muted">{project.description}</span>
         <span className="spacer" />
-        <button className="btn sm" onClick={() => setEditing(true)}>
-          Edit project
-        </button>
-        <button className="btn sm danger" onClick={remove}>
-          Delete project
-        </button>
+        {project.role === "owner" && (
+          <>
+            <button className="btn sm" onClick={() => setEditing(true)}>
+              Edit project
+            </button>
+            <button className="btn sm danger" onClick={remove}>
+              Delete project
+            </button>
+          </>
+        )}
       </div>
 
       {summary && (

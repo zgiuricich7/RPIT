@@ -6,6 +6,7 @@ import { useMe } from "./api/hooks.ts";
 import { ProjectLayout } from "./components/ProjectLayout.tsx";
 import { AuthPage } from "./pages/AuthPage.tsx";
 import { HomePage } from "./pages/HomePage.tsx";
+import { MembersPage } from "./pages/MembersPage.tsx";
 import { OverviewPage } from "./pages/OverviewPage.tsx";
 import { TasksPage } from "./pages/TasksPage.tsx";
 import { TestsPage } from "./pages/TestsPage.tsx";
@@ -36,6 +37,7 @@ function App() {
         <Route path="overview" element={<OverviewPage />} />
         <Route path="tasks" element={<TasksPage />} />
         <Route path="tests" element={<TestsPage />} />
+        <Route path="members" element={<MembersPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

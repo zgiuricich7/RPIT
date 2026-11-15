@@ -35,6 +35,24 @@ export const PRIORITY_LABELS: Record<Priority, string> = {
   low: "Low",
 };
 
+/** Ordered from most to least access. */
+export const PROJECT_ROLES = ["owner", "editor", "viewer"] as const;
+export const ProjectRole = z.enum(PROJECT_ROLES);
+export type ProjectRole = z.infer<typeof ProjectRole>;
+export const PROJECT_ROLE_LABELS: Record<ProjectRole, string> = {
+  owner: "Owner",
+  editor: "Editor",
+  viewer: "Viewer",
+};
+export const PROJECT_ROLE_DESCRIPTIONS: Record<ProjectRole, string> = {
+  owner: "Can edit everything, manage members and delete the project",
+  editor: "Can create and edit tasks and test cases, and comment",
+  viewer: "Can view the project and comment, but not change tasks or test cases",
+};
+/** True when `role` grants at least the access of `min`. */
+export const hasRole = (role: ProjectRole | null | undefined, min: ProjectRole): boolean =>
+  role != null && PROJECT_ROLES.indexOf(role) <= PROJECT_ROLES.indexOf(min);
+
 const id = z.string().min(1);
 const nullableId = id.nullable();
 const title = z.string().trim().min(1, "Title is required").max(200);
@@ -61,6 +79,16 @@ export const ProjectInput = z.object({
 export const ProjectPatch = ProjectInput.partial();
 export type ProjectInput = z.input<typeof ProjectInput>;
 export type ProjectPatch = z.infer<typeof ProjectPatch>;
+
+// ---------- Members ----------
+export const MemberInput = z.object({
+  // Trim before validating: invite emails are often pasted with stray whitespace.
+  email: z.string().trim().toLowerCase().pipe(z.email("Enter a valid email")),
+  role: ProjectRole.default("editor"),
+});
+export const MemberPatch = z.object({ role: ProjectRole });
+export type MemberInput = z.input<typeof MemberInput>;
+export type MemberPatch = z.infer<typeof MemberPatch>;
 
 // ---------- Tasks ----------
 export const TaskInput = z.object({
@@ -107,8 +135,19 @@ export interface Project {
   id: string;
   name: string;
   description: string;
+  /** The signed-in user's role in this project. */
+  role: ProjectRole;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface Member {
+  projectId: string;
+  userId: string;
+  name: string;
+  email: string;
+  role: ProjectRole;
+  createdAt: string;
 }
 
 export interface Task {

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useOutletContext } from "react-router-dom";
-import { TEST_STATUSES, TEST_STATUS_LABELS, type Project, type TestStatus } from "@tasktree/shared";
+import { TEST_STATUSES, TEST_STATUS_LABELS, hasRole, type Project, type TestStatus } from "@tasktree/shared";
 import { useTasks, useTests, useUpdateTest, useUsers } from "../api/hooks.ts";
 import { useDialogs } from "../components/dialogs.tsx";
 import { AssigneeName, Options, Stack, priorityLabel } from "../components/ui.tsx";
@@ -20,6 +20,7 @@ export function TestsPage() {
   const update = useUpdateTest(project.id);
   const dialogs = useDialogs();
   const [filter, setFilter] = useState<TestStatus | "all">("all");
+  const canEdit = hasRole(project.role, "editor");
 
   const all = tests.data ?? [];
   const counts = Object.fromEntries(
@@ -33,9 +34,11 @@ export function TestsPage() {
       <div className="toolbar">
         <h2>Test cases</h2>
         <span className="spacer" />
-        <button className="btn primary" onClick={dialogs.newTest}>
-          New test case
-        </button>
+        {canEdit && (
+          <button className="btn primary" onClick={dialogs.newTest}>
+            New test case
+          </button>
+        )}
       </div>
       <div className="stats">
         <button className={`stat ${filter === "all" ? "on" : ""}`} onClick={() => setFilter("all")}>
@@ -63,7 +66,9 @@ export function TestsPage() {
       {tests.isLoading ? (
         <div className="center-msg">Loading tests…</div>
       ) : !list.length ? (
-        <div className="empty">No test cases here. Choose New test case to add one.</div>
+        <div className="empty">
+          {canEdit ? "No test cases here. Choose New test case to add one." : "No test cases here."}
+        </div>
       ) : (
         <div className="scroll-x">
           <table className="grid">
@@ -100,6 +105,7 @@ export function TestsPage() {
                         className={`inline s-${t.status}`}
                         value={t.status}
                         aria-label={`Status of ${t.title}`}
+                        disabled={!canEdit}
                         onChange={(e) => update.mutate({ id: t.id, status: e.target.value as TestStatus })}
                       >
                         <Options labels={TEST_STATUS_LABELS} />

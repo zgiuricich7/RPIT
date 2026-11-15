@@ -31,12 +31,13 @@ server/   Express 5 API on Node's built-in SQLite (node:sqlite, no native deps)
   src/db/repo.ts      row → API mappers, shared queries, project summary
   src/routes/*.ts     one file per resource
   src/auth.ts         bcrypt passwords, opaque session id in an httpOnly cookie
+  src/access.ts       requireProjectRole middleware + project resolvers
   test/api.test.ts    supertest against an in-memory DB
 web/      React 19 + Vite + TanStack Query + React Router 7
   src/api/client.ts   fetch wrapper (throws ApiRequestError with fieldErrors)
   src/api/hooks.ts    every query/mutation hook + query keys
   src/components/dialogs.tsx  URL-driven task/test dialogs (?task=<id>, ?test=<id>) + comments UI
-  src/pages/          Overview, Tasks (List + Board), Tests, Auth
+  src/pages/          Overview, Tasks (List + Board), Tests, Members, Auth
   src/styles.css      design tokens (light/dark) and all styles; plain CSS, no framework
 docs/ROADMAP.md       prioritised backlog
 ```
@@ -44,6 +45,8 @@ docs/ROADMAP.md       prioritised backlog
 ## Data model
 
 - `projects` 1─* `tasks`, `test_cases`
+- `project_members(project_id, user_id, role)` — role is `owner` / `editor` / `viewer` (CHECK + `ProjectRole`
+  zod enum). Both FKs cascade. The project creator becomes owner; every project keeps at least one owner.
 - `tasks.parent_id → tasks.id` (nullable, `ON DELETE CASCADE`) gives unlimited nesting.
   Deleting a task deletes its whole subtree and their comments.
 - `comments.task_id → tasks.id` (cascade), `comments.author_id → users.id`
@@ -69,6 +72,12 @@ docs/ROADMAP.md       prioritised backlog
 - **Dialogs are URL state.** Open with `useDialogs().openTask(id)` / `newTask(parentId)` etc., not local state.
 - UI copy: sentence case, plain verbs, buttons say what they do ("Save task", "Post comment").
 - Every route except `/api/health` and `/api/auth/*` requires a session (`requireUser`).
+- **Every project-scoped route checks the caller's role** with `requireProjectRole` (`server/src/access.ts`):
+  `const can = requireProjectRole(db); r.patch("/:taskId", can("editor", byTask), handler)`. Resolvers
+  (`byProject`, `byTask`, `byTestCase`, `byComment`) map a route param to its project. Non-members get 404,
+  members below the required role get 403. Viewers read and comment; editors also write tasks and tests;
+  owners also edit/delete the project and manage members. Comment authors can delete their own comments. Assignees must be project members (`checkAssignee`).
+- On the web, `useProjectRole(projectId)` / `project.role` only hide controls; the server is the authority.
 
 ## Adding a feature (checklist)
 
@@ -77,7 +86,8 @@ docs/ROADMAP.md       prioritised backlog
 
 ## Known limitations (see docs/ROADMAP.md)
 
-- Single workspace: every signed-in user sees every project. No roles or per-project membership yet.
+- Invites only work for existing accounts (no pending invites or invite emails yet).
+  `GET /api/users` still lists every user; it is only used to display assignee names.
 - No real-time updates; TanStack Query refetches on focus and after mutations.
 - Board drag-and-drop uses native HTML5 DnD (no touch support, no reordering within a column).
 - SQLite single file; fine for a team on one server. Postgres is on the roadmap.

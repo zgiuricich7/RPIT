@@ -113,9 +113,165 @@ describe("comments", () => {
     const { db, agent, projectId } = ctx;
     const t = (await agent.post(`/api/projects/${projectId}/tasks`).send({ title: "A" })).body;
     const c = (await agent.post(`/api/tasks/${t.id}/comments`).send({ body: "Mine" })).body;
-    const other = request.agent(createApp(db));
-    await other.post("/api/auth/register").send({ name: "B", email: "b@x.com", password: "password123" });
+    const other = await signUp(db, "B", "b@x.com");
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "b@x.com", role: "editor" }).expect(201);
     await other.delete(`/api/comments/${c.id}`).expect(403);
+  });
+});
+
+/** Registers a second user on the same DB and returns their agent. */
+async function signUp(db: ReturnType<typeof openDatabase>, name: string, email: string) {
+  const a = request.agent(createApp(db));
+  await a.post("/api/auth/register").send({ name, email, password: "password123" }).expect(201);
+  return a;
+}
+
+describe("project membership and roles", () => {
+  it("makes the creator owner and lists only member projects", async () => {
+    const { db, agent, projectId } = ctx;
+    const projects = (await agent.get("/api/projects").expect(200)).body;
+    expect(projects).toEqual([expect.objectContaining({ id: projectId, role: "owner" })]);
+
+    const outsider = await signUp(db, "Out", "out@x.com");
+    expect((await outsider.get("/api/projects").expect(200)).body).toEqual([]);
+  });
+
+  it("hides projects and their content from non-members", async () => {
+    const { db, agent, projectId } = ctx;
+    const t = (await agent.post(`/api/projects/${projectId}/tasks`).send({ title: "A" })).body;
+    const tc = (await agent.post(`/api/projects/${projectId}/tests`).send({ title: "T" })).body;
+    const c = (await agent.post(`/api/tasks/${t.id}/comments`).send({ body: "Hi" })).body;
+    const outsider = await signUp(db, "Out", "out@x.com");
+
+    await outsider.get(`/api/projects/${projectId}`).expect(404);
+    await outsider.get(`/api/projects/${projectId}/tasks`).expect(404);
+    await outsider.get(`/api/projects/${projectId}/tests`).expect(404);
+    await outsider.get(`/api/projects/${projectId}/summary`).expect(404);
+    await outsider.get(`/api/projects/${projectId}/comments/recent`).expect(404);
+    await outsider.get(`/api/projects/${projectId}/members`).expect(404);
+    await outsider.get(`/api/tasks/${t.id}`).expect(404);
+    await outsider.get(`/api/tasks/${t.id}/comments`).expect(404);
+    await outsider.patch(`/api/tasks/${t.id}`).send({ title: "X" }).expect(404);
+    await outsider.get(`/api/tests/${tc.id}`).expect(404);
+    await outsider.delete(`/api/comments/${c.id}`).expect(404);
+    await outsider.post(`/api/projects/${projectId}/tasks`).send({ title: "X" }).expect(404);
+  });
+
+  it("lets viewers read and comment only, and editors write but not manage", async () => {
+    const { db, agent, projectId } = ctx;
+    const t = (await agent.post(`/api/projects/${projectId}/tasks`).send({ title: "A" })).body;
+    const tc = (await agent.post(`/api/projects/${projectId}/tests`).send({ title: "T" })).body;
+    const viewer = await signUp(db, "Vee", "v@x.com");
+    const editor = await signUp(db, "Ed", "e@x.com");
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "v@x.com", role: "viewer" }).expect(201);
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "e@x.com" }).expect(201); // defaults to editor
+
+    // Viewer: reads and comments succeed, other writes are forbidden.
+    expect((await viewer.get(`/api/projects/${projectId}`).expect(200)).body.role).toBe("viewer");
+    await viewer.get(`/api/projects/${projectId}/tasks`).expect(200);
+    await viewer.get(`/api/tasks/${t.id}/comments`).expect(200);
+    await viewer.post(`/api/projects/${projectId}/tasks`).send({ title: "X" }).expect(403);
+    await viewer.patch(`/api/tasks/${t.id}`).send({ status: "done" }).expect(403);
+    await viewer.delete(`/api/tasks/${t.id}`).expect(403);
+    await viewer.patch(`/api/tests/${tc.id}`).send({ status: "passed" }).expect(403);
+    await viewer.delete(`/api/tests/${tc.id}`).expect(403);
+    const vc = (await viewer.post(`/api/tasks/${t.id}/comments`).send({ body: "Looks good" }).expect(201)).body;
+    expect(vc).toMatchObject({ authorName: "Vee", body: "Looks good" });
+    await viewer.delete(`/api/comments/${vc.id}`).expect(204);
+
+    // Editor: content writes succeed, project and member management is forbidden.
+    await editor.post(`/api/projects/${projectId}/tasks`).send({ title: "B" }).expect(201);
+    await editor.patch(`/api/tasks/${t.id}`).send({ status: "done" }).expect(200);
+    await editor.post(`/api/tasks/${t.id}/comments`).send({ body: "Done" }).expect(201);
+    await editor.patch(`/api/tests/${tc.id}`).send({ status: "passed" }).expect(200);
+    await editor.patch(`/api/projects/${projectId}`).send({ name: "Renamed" }).expect(403);
+    await editor.delete(`/api/projects/${projectId}`).expect(403);
+    await editor.post(`/api/projects/${projectId}/members`).send({ email: "t@example.com" }).expect(403);
+  });
+
+  it("invites by email, changes roles and removes members", async () => {
+    const { db, agent, projectId } = ctx;
+    await signUp(db, "Bea", "bea@x.com");
+
+    const bad = await agent.post(`/api/projects/${projectId}/members`).send({ email: "nobody@x.com" }).expect(400);
+    expect(bad.body.fieldErrors.email).toBeDefined();
+
+    const m = (await agent
+      .post(`/api/projects/${projectId}/members`)
+      .send({ email: " BEA@x.com ", role: "viewer" })
+      .expect(201)).body;
+    expect(m).toMatchObject({ name: "Bea", email: "bea@x.com", role: "viewer", projectId });
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "bea@x.com" }).expect(409);
+
+    await agent.patch(`/api/projects/${projectId}/members/${m.userId}`).send({ role: "editor" }).expect(200);
+    await agent.patch(`/api/projects/${projectId}/members/${m.userId}`).send({ role: "admin" }).expect(400);
+    const list = (await agent.get(`/api/projects/${projectId}/members`).expect(200)).body;
+    expect(list.map((x: { name: string; role: string }) => [x.name, x.role])).toEqual([
+      ["Bea", "editor"],
+      ["Tester", "owner"],
+    ]);
+
+    await agent.delete(`/api/projects/${projectId}/members/${m.userId}`).expect(204);
+    await agent.delete(`/api/projects/${projectId}/members/${m.userId}`).expect(404);
+  });
+
+  it("always keeps at least one owner", async () => {
+    const { db, agent, projectId, userId } = ctx;
+    await agent.patch(`/api/projects/${projectId}/members/${userId}`).send({ role: "editor" }).expect(400);
+    await agent.delete(`/api/projects/${projectId}/members/${userId}`).expect(400);
+
+    const bea = await signUp(db, "Bea", "bea@x.com");
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "bea@x.com", role: "owner" }).expect(201);
+    await agent.patch(`/api/projects/${projectId}/members/${userId}`).send({ role: "viewer" }).expect(200);
+    // Now Bea is the only owner and can't leave.
+    const beaId = (await bea.get("/api/auth/me")).body.id;
+    await bea.delete(`/api/projects/${projectId}/members/${beaId}`).expect(400);
+  });
+
+  it("lets members leave, and only owners remove others", async () => {
+    const { db, agent, projectId, userId } = ctx;
+    const ed = await signUp(db, "Ed", "e@x.com");
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "e@x.com" }).expect(201);
+    const edId = (await ed.get("/api/auth/me")).body.id;
+
+    await ed.delete(`/api/projects/${projectId}/members/${userId}`).expect(403);
+    await ed.delete(`/api/projects/${projectId}/members/${edId}`).expect(204);
+    await ed.get(`/api/projects/${projectId}`).expect(404);
+  });
+
+  it("requires assignees to be members and unassigns removed members", async () => {
+    const { db, agent, projectId } = ctx;
+    const ed = await signUp(db, "Ed", "e@x.com");
+    const edId = (await ed.get("/api/auth/me")).body.id;
+
+    await agent.post(`/api/projects/${projectId}/tasks`).send({ title: "A", assigneeId: edId }).expect(400);
+    await agent.post(`/api/projects/${projectId}/tests`).send({ title: "T", assigneeId: edId }).expect(400);
+
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "e@x.com" }).expect(201);
+    const t = (await agent.post(`/api/projects/${projectId}/tasks`).send({ title: "A", assigneeId: edId }).expect(201)).body;
+    const tc = (await agent.post(`/api/projects/${projectId}/tests`).send({ title: "T", assigneeId: edId }).expect(201)).body;
+
+    await agent.delete(`/api/projects/${projectId}/members/${edId}`).expect(204);
+    expect((await agent.get(`/api/tasks/${t.id}`)).body.assigneeId).toBeNull();
+    expect((await agent.get(`/api/tests/${tc.id}`)).body.assigneeId).toBeNull();
+  });
+
+  it("backfills existing projects so every existing user keeps access", async () => {
+    // Simulate a database at schema version 1 with data, then run the membership migration.
+    const { DatabaseSync } = await import("node:sqlite");
+    const { migrations } = await import("../src/db/migrations.ts");
+    const { migrate } = await import("../src/db/index.ts");
+    const raw = new DatabaseSync(":memory:");
+    raw.exec("PRAGMA foreign_keys = ON");
+    raw.exec(migrations[0]!);
+    raw.exec("PRAGMA user_version = 1");
+    raw.exec(`INSERT INTO users (id, email, name, password_hash) VALUES ('u1','a@x','A','h'), ('u2','b@x','B','h')`);
+    raw.exec(`INSERT INTO projects (id, name) VALUES ('p1','P1')`);
+    migrate(raw);
+    expect(raw.prepare(`SELECT user_id, role FROM project_members ORDER BY user_id`).all()).toEqual([
+      { user_id: "u1", role: "owner" },
+      { user_id: "u2", role: "owner" },
+    ]);
   });
 });
 

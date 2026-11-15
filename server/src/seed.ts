@@ -28,6 +28,9 @@ db.prepare(`INSERT INTO projects (id, name, description) VALUES (?, ?, ?)`).run(
   "Website redesign",
   "Refresh the marketing site and component library.",
 );
+const addMember = db.prepare(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, ?)`);
+addMember.run(project, maya, "owner");
+addMember.run(project, priya, "editor");
 
 const insertTask = db.prepare(
   `INSERT INTO tasks (id, project_id, parent_id, title, status, priority, assignee_id, position)

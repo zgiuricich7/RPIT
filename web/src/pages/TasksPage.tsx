@@ -6,6 +6,7 @@ import {
   ancestors,
   buildTree,
   childrenIndex,
+  hasRole,
   leafProgress,
   type Project,
   type Task,
@@ -24,6 +25,7 @@ export function TasksPage() {
   const tasks = useTasks(project.id);
   const users = useUsers().data;
   const dialogs = useDialogs();
+  const canEdit = hasRole(project.role, "editor");
 
   const setView = (v: "list" | "board") =>
     setSp((prev) => {
@@ -44,20 +46,24 @@ export function TasksPage() {
           </button>
         </div>
         <span className="spacer" />
-        <button className="btn primary" onClick={() => dialogs.newTask()}>
-          New task
-        </button>
+        {canEdit && (
+          <button className="btn primary" onClick={() => dialogs.newTask()}>
+            New task
+          </button>
+        )}
       </div>
       {tasks.isLoading ? (
         <div className="center-msg">Loading tasks…</div>
       ) : tasks.error ? (
         <div className="empty">{tasks.error.message}</div>
       ) : !tasks.data?.length ? (
-        <div className="empty">No tasks yet. Choose New task to add your first one.</div>
+        <div className="empty">
+          {canEdit ? "No tasks yet. Choose New task to add your first one." : "No tasks yet."}
+        </div>
       ) : view === "list" ? (
-        <ListView tasks={tasks.data} users={users} />
+        <ListView tasks={tasks.data} users={users} canEdit={canEdit} />
       ) : (
-        <BoardView projectId={project.id} tasks={tasks.data} users={users} />
+        <BoardView projectId={project.id} tasks={tasks.data} users={users} canEdit={canEdit} />
       )}
     </>
   );
@@ -65,7 +71,7 @@ export function TasksPage() {
 
 // ---------------------------------------------------------------------------
 
-function ListView({ tasks, users }: { tasks: Task[]; users: User[] | undefined }) {
+function ListView({ tasks, users, canEdit }: { tasks: Task[]; users: User[] | undefined; canEdit: boolean }) {
   const dialogs = useDialogs();
   const tree = useMemo(() => buildTree(tasks), [tasks]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -110,9 +116,11 @@ function ListView({ tasks, users }: { tasks: Task[]; users: User[] | undefined }
           </td>
           <td>{children.length > 0 && <Meter {...leafProgress(tasks, t.id)} />}</td>
           <td className="actions">
-            <button className="btn sm" onClick={() => dialogs.newTask(t.id)}>
-              Add subtask
-            </button>
+            {canEdit && (
+              <button className="btn sm" onClick={() => dialogs.newTask(t.id)}>
+                Add subtask
+              </button>
+            )}
           </td>
         </tr>,
       );
@@ -152,7 +160,8 @@ function ListView({ tasks, users }: { tasks: Task[]; users: User[] | undefined }
 
 // ---------------------------------------------------------------------------
 
-function BoardView({ projectId, tasks, users }: { projectId: string; tasks: Task[]; users: User[] | undefined }) {
+function BoardView(props: { projectId: string; tasks: Task[]; users: User[] | undefined; canEdit: boolean }) {
+  const { projectId, tasks, users, canEdit } = props;
   const dialogs = useDialogs();
   const update = useUpdateTask(projectId);
   const [leafOnly, setLeafOnly] = useState(false);
@@ -203,7 +212,7 @@ function BoardView({ projectId, tasks, users }: { projectId: string; tasks: Task
                   <article
                     key={t.id}
                     className={`card p-${t.priority} ${dragId === t.id ? "dragging" : ""}`}
-                    draggable
+                    draggable={canEdit}
                     onDragStart={(e) => {
                       setDragId(t.id);
                       e.dataTransfer.setData("text/plain", t.id);
@@ -223,9 +232,11 @@ function BoardView({ projectId, tasks, users }: { projectId: string; tasks: Task
                         <AssigneeName id={t.assigneeId} users={users} />
                         {t.commentCount > 0 && <span className="comment-count">💬 {t.commentCount}</span>}
                       </span>
-                      <button className="btn sm" onClick={() => dialogs.newTask(t.id)}>
-                        Add subtask
-                      </button>
+                      {canEdit && (
+                        <button className="btn sm" onClick={() => dialogs.newTask(t.id)}>
+                          Add subtask
+                        </button>
+                      )}
                     </div>
                   </article>
                 );

@@ -23,12 +23,13 @@ import {
   useDeleteTest,
   useMe,
   usePostComment,
+  useMembers,
+  useProjectRole,
   useTasks,
   useTests,
   useUpdateProject,
   useUpdateTask,
   useUpdateTest,
-  useUsers,
 } from "../api/hooks.ts";
 import { formatDateTime } from "../lib/format.ts";
 import { Modal, Options } from "./ui.tsx";
@@ -62,6 +63,10 @@ export function DialogHost({ projectId }: { projectId: string }) {
   const tests = useTests(projectId).data;
   const taskParam = sp.get("task");
   const testParam = sp.get("test");
+  const { canEdit } = useProjectRole(projectId);
+
+  // Viewers can open existing items read-only but can't create new ones.
+  if ((taskParam === "new" || testParam === "new") && !canEdit) return null;
 
   if (taskParam && tasks) {
     const task = taskParam === "new" ? null : tasks.find((t) => t.id === taskParam);
@@ -98,7 +103,8 @@ function TaskDialog(props: {
   onClose: () => void;
 }) {
   const { projectId, task, tasks, onClose } = props;
-  const users = useUsers().data ?? [];
+  const members = useMembers(projectId).data ?? [];
+  const { canEdit } = useProjectRole(projectId);
   const create = useCreateTask(projectId);
   const update = useUpdateTask(projectId);
   const del = useDeleteTask(projectId);
@@ -139,70 +145,75 @@ function TaskDialog(props: {
   }
 
   const busy = create.isPending || update.isPending;
+  const heading = !task ? "New task" : canEdit ? "Edit task" : "Task";
   return (
-    <Modal title={task ? "Edit task" : "New task"} onClose={onClose}>
+    <Modal title={heading} onClose={onClose}>
       <form className="modal-body" onSubmit={submit} id="task-form">
-        <h2>{task ? "Edit task" : "New task"}</h2>
-        <label className="field">
-          Title
-          <input autoFocus value={form.title} onChange={(e) => set("title", e.target.value)} required maxLength={200} />
-        </label>
-        <label className="field">
-          Description
-          <textarea rows={3} value={form.description} onChange={(e) => set("description", e.target.value)} />
-        </label>
-        <div className="two">
+        <h2>{heading}</h2>
+        <fieldset className="fields" disabled={!canEdit}>
           <label className="field">
-            Status
-            <select value={form.status} onChange={(e) => set("status", e.target.value as TaskStatus)}>
-              <Options labels={TASK_STATUS_LABELS} />
-            </select>
+            Title
+            <input autoFocus value={form.title} onChange={(e) => set("title", e.target.value)} required maxLength={200} />
           </label>
           <label className="field">
-            Priority
-            <select value={form.priority} onChange={(e) => set("priority", e.target.value as Priority)}>
-              <Options labels={PRIORITY_LABELS} />
-            </select>
+            Description
+            <textarea rows={3} value={form.description} onChange={(e) => set("description", e.target.value)} />
           </label>
-        </div>
-        <div className="two">
-          <label className="field">
-            Assignee
-            <select value={form.assigneeId} onChange={(e) => set("assigneeId", e.target.value)}>
-              <option value="">Unassigned</option>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            Parent task
-            <select value={form.parentId} onChange={(e) => set("parentId", e.target.value)}>
-              <option value="">No parent (top level)</option>
-              {parentOptions.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {taskPath(tasks, t)}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
+          <div className="two">
+            <label className="field">
+              Status
+              <select value={form.status} onChange={(e) => set("status", e.target.value as TaskStatus)}>
+                <Options labels={TASK_STATUS_LABELS} />
+              </select>
+            </label>
+            <label className="field">
+              Priority
+              <select value={form.priority} onChange={(e) => set("priority", e.target.value as Priority)}>
+                <Options labels={PRIORITY_LABELS} />
+              </select>
+            </label>
+          </div>
+          <div className="two">
+            <label className="field">
+              Assignee
+              <select value={form.assigneeId} onChange={(e) => set("assigneeId", e.target.value)}>
+                <option value="">Unassigned</option>
+                {members.map((m) => (
+                  <option key={m.userId} value={m.userId}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              Parent task
+              <select value={form.parentId} onChange={(e) => set("parentId", e.target.value)}>
+                <option value="">No parent (top level)</option>
+                {parentOptions.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {taskPath(tasks, t)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </fieldset>
         {error && <div className="form-error">{error}</div>}
         <div style={{ display: "flex", gap: 8 }}>
-          {task && (
+          {task && canEdit && (
             <button type="button" className="btn danger" onClick={remove}>
               Delete task
             </button>
           )}
           <span className="spacer" />
           <button type="button" className="btn" onClick={onClose}>
-            Cancel
+            {canEdit ? "Cancel" : "Close"}
           </button>
-          <button className="btn primary" disabled={busy}>
-            {busy ? "Saving…" : "Save task"}
-          </button>
+          {canEdit && (
+            <button className="btn primary" disabled={busy}>
+              {busy ? "Saving…" : "Save task"}
+            </button>
+          )}
         </div>
       </form>
       {task && (
@@ -259,6 +270,7 @@ function Discussion({ projectId, taskId }: { projectId: string; taskId: string }
           <p>{c.body}</p>
         </div>
       ))}
+      {/* Every member can comment, including viewers. */}
       <form onSubmit={submit} className="discussion">
         <label className="field">
           Comment
@@ -287,7 +299,8 @@ function Discussion({ projectId, taskId }: { projectId: string; taskId: string }
 
 function TestDialog(props: { projectId: string; test: TestCase | null; tasks: Task[]; onClose: () => void }) {
   const { projectId, test, tasks, onClose } = props;
-  const users = useUsers().data ?? [];
+  const members = useMembers(projectId).data ?? [];
+  const { canEdit } = useProjectRole(projectId);
   const create = useCreateTest(projectId);
   const update = useUpdateTest(projectId);
   const del = useDeleteTest(projectId);
@@ -318,67 +331,70 @@ function TestDialog(props: { projectId: string; test: TestCase | null; tasks: Ta
   }
 
   const busy = create.isPending || update.isPending;
+  const heading = !test ? "New test case" : canEdit ? "Edit test case" : "Test case";
   return (
-    <Modal title={test ? "Edit test case" : "New test case"} onClose={onClose}>
+    <Modal title={heading} onClose={onClose}>
       <form className="modal-body" onSubmit={submit}>
-        <h2>{test ? "Edit test case" : "New test case"}</h2>
-        <label className="field">
-          Title
-          <input autoFocus value={form.title} onChange={(e) => set("title", e.target.value)} required />
-        </label>
-        <div className="two">
+        <h2>{heading}</h2>
+        <fieldset className="fields" disabled={!canEdit}>
           <label className="field">
-            Status
-            <select value={form.status} onChange={(e) => set("status", e.target.value as TestStatus)}>
-              <Options labels={TEST_STATUS_LABELS} />
-            </select>
+            Title
+            <input autoFocus value={form.title} onChange={(e) => set("title", e.target.value)} required />
+          </label>
+          <div className="two">
+            <label className="field">
+              Status
+              <select value={form.status} onChange={(e) => set("status", e.target.value as TestStatus)}>
+                <Options labels={TEST_STATUS_LABELS} />
+              </select>
+            </label>
+            <label className="field">
+              Priority
+              <select value={form.priority} onChange={(e) => set("priority", e.target.value as Priority)}>
+                <Options labels={PRIORITY_LABELS} />
+              </select>
+            </label>
+          </div>
+          <div className="two">
+            <label className="field">
+              Assignee
+              <select value={form.assigneeId} onChange={(e) => set("assigneeId", e.target.value)}>
+                <option value="">Unassigned</option>
+                {members.map((m) => (
+                  <option key={m.userId} value={m.userId}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              Linked task
+              <select value={form.taskId} onChange={(e) => set("taskId", e.target.value)}>
+                <option value="">None</option>
+                {tasks.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {taskPath(tasks, t)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="field">
+            Steps
+            <textarea rows={4} value={form.steps} onChange={(e) => set("steps", e.target.value)} />
           </label>
           <label className="field">
-            Priority
-            <select value={form.priority} onChange={(e) => set("priority", e.target.value as Priority)}>
-              <Options labels={PRIORITY_LABELS} />
-            </select>
-          </label>
-        </div>
-        <div className="two">
-          <label className="field">
-            Assignee
-            <select value={form.assigneeId} onChange={(e) => set("assigneeId", e.target.value)}>
-              <option value="">Unassigned</option>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
-              ))}
-            </select>
+            Expected result
+            <input value={form.expected} onChange={(e) => set("expected", e.target.value)} />
           </label>
           <label className="field">
-            Linked task
-            <select value={form.taskId} onChange={(e) => set("taskId", e.target.value)}>
-              <option value="">None</option>
-              {tasks.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {taskPath(tasks, t)}
-                </option>
-              ))}
-            </select>
+            Notes and documentation
+            <textarea rows={3} value={form.notes} onChange={(e) => set("notes", e.target.value)} />
           </label>
-        </div>
-        <label className="field">
-          Steps
-          <textarea rows={4} value={form.steps} onChange={(e) => set("steps", e.target.value)} />
-        </label>
-        <label className="field">
-          Expected result
-          <input value={form.expected} onChange={(e) => set("expected", e.target.value)} />
-        </label>
-        <label className="field">
-          Notes and documentation
-          <textarea rows={3} value={form.notes} onChange={(e) => set("notes", e.target.value)} />
-        </label>
+        </fieldset>
         {error && <div className="form-error">{error}</div>}
         <div style={{ display: "flex", gap: 8 }}>
-          {test && (
+          {test && canEdit && (
             <button
               type="button"
               className="btn danger"
@@ -393,11 +409,13 @@ function TestDialog(props: { projectId: string; test: TestCase | null; tasks: Ta
           )}
           <span className="spacer" />
           <button type="button" className="btn" onClick={onClose}>
-            Cancel
+            {canEdit ? "Cancel" : "Close"}
           </button>
-          <button className="btn primary" disabled={busy}>
-            {busy ? "Saving…" : "Save test case"}
-          </button>
+          {canEdit && (
+            <button className="btn primary" disabled={busy}>
+              {busy ? "Saving…" : "Save test case"}
+            </button>
+          )}
         </div>
       </form>
     </Modal>

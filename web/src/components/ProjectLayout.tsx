@@ -39,6 +39,7 @@ export function ProjectLayout() {
           <NavLink to="overview">Overview</NavLink>
           <NavLink to="tasks">Tasks</NavLink>
           <NavLink to="tests">Test cases</NavLink>
+          <NavLink to="members">Members</NavLink>
         </nav>
         <span className="spacer" />
         <span className="muted">{me?.name}</span>

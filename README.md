@@ -6,6 +6,7 @@ and test case tracking — with a per-project overview dashboard.
 ## Features
 
 - **Projects**, each with its own task tree, board and test cases
+- **Project members** with owner, editor and viewer roles; invite teammates by email
 - **Unlimited subtask nesting** with progress roll-ups (measured on tasks that have no subtasks)
 - **List view** (collapsible tree) and **Board view** (drag cards between status columns)
 - **Comments** on every task, with authors and timestamps
@@ -66,6 +67,8 @@ GET    /users
 GET    /projects                 POST /projects
 GET    /projects/:id             PATCH/DELETE /projects/:id
 GET    /projects/:id/summary     GET /projects/:id/comments/recent
+GET    /projects/:id/members     POST /projects/:id/members   (invite by email)
+PATCH/DELETE /projects/:id/members/:userId
 GET    /projects/:id/tasks       POST /projects/:id/tasks
 GET    /tasks/:id                PATCH/DELETE /tasks/:id
 GET    /tasks/:id/comments       POST /tasks/:id/comments      DELETE /comments/:id

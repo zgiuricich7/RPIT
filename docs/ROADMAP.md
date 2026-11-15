@@ -5,9 +5,8 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
 
 ## 1. Collaboration essentials
 
-1.1 **Project membership and roles.** `project_members(project_id, user_id, role)` with
-    owner / editor / viewer. Filter `GET /projects` by membership, check role in every
-    project-scoped route (a `requireProjectRole` middleware), invite by email.
+1.1 ~~**Project membership and roles.**~~ Done. Follow-up: pending invites for emails without an
+    account (send an invite link, add the membership on sign-up).
 1.2 **@-mentions in comments.** Parse `@Name`, store mentions, highlight in the UI.
 1.3 **Notifications.** In-app inbox for assignments, mentions and replies; optional email digest.
 1.4 **Activity log.** `activity(project_id, actor_id, entity, entity_id, action, diff, created_at)`

@@ -2,28 +2,29 @@ import { Router } from "express";
 import { CommentInput, TaskInput, TaskPatch } from "@tasktree/shared";
 import type { DB } from "../db/index.ts";
 import { newId, now } from "../db/index.ts";
-import { COMMENT_SELECT, getTask, listTasks, toComment, wouldCreateCycle } from "../db/repo.ts";
+import { COMMENT_SELECT, getMemberRole, getTask, listTasks, toComment, wouldCreateCycle } from "../db/repo.ts";
 import { HttpError, notFound, param, parseBody } from "../http.ts";
 import { currentUser } from "../auth.ts";
+import { byComment, byTask, requireProjectRole } from "../access.ts";
+
+/** Assignees must be members of the project. */
+export function checkAssignee(db: DB, projectId: string, assigneeId: string | null | undefined) {
+  if (assigneeId && !getMemberRole(db, projectId, assigneeId)) {
+    throw new HttpError(400, "Assignee must be a member of this project");
+  }
+}
 
 export function taskRoutes(db: DB) {
   /** Mounted at /api/projects/:projectId/tasks */
   const byProject = Router({ mergeParams: true });
   /** Mounted at /api/tasks */
   const byId = Router();
+  const can = requireProjectRole(db);
 
-  const requireProject = (id: string) => {
-    if (!db.prepare(`SELECT 1 FROM projects WHERE id = ?`).get(id)) throw notFound("Project");
-  };
   const requireTask = (id: string) => {
     const t = getTask(db, id);
     if (!t) throw notFound("Task");
     return t;
-  };
-  const checkUser = (id: string | null | undefined) => {
-    if (id && !db.prepare(`SELECT 1 FROM users WHERE id = ?`).get(id)) {
-      throw new HttpError(400, "Assignee does not exist");
-    }
   };
   const checkParent = (projectId: string, parentId: string | null | undefined) => {
     if (!parentId) return;
@@ -37,18 +38,15 @@ export function taskRoutes(db: DB) {
     return row.pos;
   };
 
-  byProject.get("/", (req, res) => {
-    const projectId = param(req, "projectId");
-    requireProject(projectId);
-    res.json(listTasks(db, projectId));
+  byProject.get("/", can("viewer"), (req, res) => {
+    res.json(listTasks(db, param(req, "projectId")));
   });
 
-  byProject.post("/", (req, res) => {
+  byProject.post("/", can("editor"), (req, res) => {
     const projectId = param(req, "projectId");
-    requireProject(projectId);
     const input = parseBody(TaskInput, req.body);
     checkParent(projectId, input.parentId);
-    checkUser(input.assigneeId);
+    checkAssignee(db, projectId, input.assigneeId);
     const id = newId();
     db.prepare(
       `INSERT INTO tasks (id, project_id, parent_id, title, description, status, priority, assignee_id, position)
@@ -67,11 +65,11 @@ export function taskRoutes(db: DB) {
     res.status(201).json(requireTask(id));
   });
 
-  byId.get("/:taskId", (req, res) => {
+  byId.get("/:taskId", can("viewer", byTask), (req, res) => {
     res.json(requireTask(param(req, "taskId")));
   });
 
-  byId.patch("/:taskId", (req, res) => {
+  byId.patch("/:taskId", can("editor", byTask), (req, res) => {
     const id = param(req, "taskId");
     const cur = requireTask(id);
     const p = parseBody(TaskPatch, req.body);
@@ -83,7 +81,7 @@ export function taskRoutes(db: DB) {
       }
       position = nextPosition(cur.projectId, p.parentId);
     }
-    checkUser(p.assigneeId);
+    if (p.assigneeId !== undefined && p.assigneeId !== cur.assigneeId) checkAssignee(db, cur.projectId, p.assigneeId);
     const merged = { ...cur, ...p, position };
     db.prepare(
       `UPDATE tasks SET parent_id = ?, title = ?, description = ?, status = ?, priority = ?,
@@ -102,24 +100,20 @@ export function taskRoutes(db: DB) {
     res.json(requireTask(id));
   });
 
-  byId.delete("/:taskId", (req, res) => {
-    const id = param(req, "taskId");
-    requireTask(id);
-    db.prepare(`DELETE FROM tasks WHERE id = ?`).run(id); // cascades to subtasks + comments
+  byId.delete("/:taskId", can("editor", byTask), (req, res) => {
+    db.prepare(`DELETE FROM tasks WHERE id = ?`).run(param(req, "taskId")); // cascades to subtasks + comments
     res.status(204).end();
   });
 
   // ----- Comments -----
-  byId.get("/:taskId/comments", (req, res) => {
-    const id = param(req, "taskId");
-    requireTask(id);
-    const rows = db.prepare(`${COMMENT_SELECT} WHERE c.task_id = ? ORDER BY c.created_at`).all(id);
+  byId.get("/:taskId/comments", can("viewer", byTask), (req, res) => {
+    const rows = db.prepare(`${COMMENT_SELECT} WHERE c.task_id = ? ORDER BY c.created_at`).all(param(req, "taskId"));
     res.json((rows as Record<string, unknown>[]).map(toComment));
   });
 
-  byId.post("/:taskId/comments", (req, res) => {
+  /** Any member can comment, including viewers. */
+  byId.post("/:taskId/comments", can("viewer", byTask), (req, res) => {
     const taskId = param(req, "taskId");
-    requireTask(taskId);
     const { body } = parseBody(CommentInput, req.body);
     const id = newId();
     db.prepare(`INSERT INTO comments (id, task_id, author_id, body) VALUES (?, ?, ?, ?)`).run(
@@ -137,12 +131,11 @@ export function taskRoutes(db: DB) {
 
 export function commentRoutes(db: DB) {
   const r = Router();
-  r.delete("/:commentId", (req, res) => {
+  const can = requireProjectRole(db);
+  /** Any member may delete their own comments. */
+  r.delete("/:commentId", can("viewer", byComment), (req, res) => {
     const id = param(req, "commentId");
-    const row = db.prepare(`SELECT author_id FROM comments WHERE id = ?`).get(id) as
-      | { author_id: string }
-      | undefined;
-    if (!row) throw notFound("Comment");
+    const row = db.prepare(`SELECT author_id FROM comments WHERE id = ?`).get(id) as { author_id: string };
     if (row.author_id !== currentUser(req).id) throw new HttpError(403, "You can only delete your own comments");
     db.prepare(`DELETE FROM comments WHERE id = ?`).run(id);
     res.status(204).end();

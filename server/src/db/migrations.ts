@@ -74,4 +74,20 @@ export const migrations: string[] = [
   );
   CREATE INDEX idx_tests_project ON test_cases(project_id);
   `,
+
+  /* 2: project membership and roles */ `
+  CREATE TABLE project_members (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role       TEXT NOT NULL CHECK (role IN ('owner','editor','viewer')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    PRIMARY KEY (project_id, user_id)
+  );
+  CREATE INDEX idx_members_user ON project_members(user_id);
+
+  -- Before this migration every user could see and edit every project.
+  -- Preserve that access by making every existing user an owner of every existing project.
+  INSERT INTO project_members (project_id, user_id, role)
+  SELECT p.id, u.id, 'owner' FROM projects p CROSS JOIN users u;
+  `,
 ];

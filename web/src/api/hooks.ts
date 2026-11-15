@@ -1,7 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { hasRole, type ProjectRole } from "@tasktree/shared";
 import type {
   Comment,
   LoginInput,
+  Member,
+  MemberInput,
   Project,
   ProjectInput,
   ProjectPatch,
@@ -31,6 +34,7 @@ export const keys = {
   tests: (projectId: string) => ["project", projectId, "tests"] as const,
   summary: (projectId: string) => ["project", projectId, "summary"] as const,
   recent: (projectId: string) => ["project", projectId, "recent-comments"] as const,
+  members: (projectId: string) => ["project", projectId, "members"] as const,
   comments: (taskId: string) => ["task", taskId, "comments"] as const,
 };
 
@@ -125,9 +129,61 @@ export function useDeleteProject() {
   });
 }
 
-// ---------- Tasks ----------
 const invalidateProject = (qc: ReturnType<typeof useQueryClient>, projectId: string) =>
   qc.invalidateQueries({ queryKey: ["project", projectId] });
+
+// ---------- Members and roles ----------
+/**
+ * The signed-in user's role in a project, from the projects list, plus
+ * convenience flags. The server enforces roles; this only adapts the UI.
+ */
+export function useProjectRole(projectId: string) {
+  const role: ProjectRole | undefined = useProjects().data?.find((p) => p.id === projectId)?.role;
+  return { role, canEdit: hasRole(role, "editor"), isOwner: hasRole(role, "owner") };
+}
+
+export function useMembers(projectId: string) {
+  return useQuery({
+    queryKey: keys.members(projectId),
+    queryFn: () => api<Member[]>(`/projects/${projectId}/members`),
+  });
+}
+
+export function useAddMember(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: MemberInput) =>
+      api<Member>(`/projects/${projectId}/members`, { method: "POST", body: input }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+export function useUpdateMember(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: ProjectRole }) =>
+      api<Member>(`/projects/${projectId}/members/${userId}`, { method: "PATCH", body: { role } }),
+    onSuccess: () => {
+      invalidateProject(qc, projectId);
+      // The current user's own role lives on the projects list.
+      qc.invalidateQueries({ queryKey: keys.projects });
+    },
+  });
+}
+
+/** Removes a member, or leaves the project when `userId` is the current user. */
+export function useRemoveMember(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => api<void>(`/projects/${projectId}/members/${userId}`, { method: "DELETE" }),
+    onSuccess: () => {
+      invalidateProject(qc, projectId);
+      qc.invalidateQueries({ queryKey: keys.projects });
+    },
+  });
+}
+
+// ---------- Tasks ----------
 
 export function useTasks(projectId: string) {
   return useQuery({ queryKey: keys.tasks(projectId), queryFn: () => api<Task[]>(`/projects/${projectId}/tasks`) });

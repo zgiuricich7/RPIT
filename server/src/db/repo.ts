@@ -1,6 +1,8 @@
 import type {
   Comment,
+  Member,
   Project,
+  ProjectRole,
   ProjectSummary,
   RecentComment,
   Task,
@@ -23,12 +25,23 @@ export const toUser = (r: Row): User => ({
   email: r.email as string,
 });
 
+/** Expects the row to include the viewer's `role` (see PROJECT_SELECT). */
 export const toProject = (r: Row): Project => ({
   id: r.id as string,
   name: r.name as string,
   description: r.description as string,
+  role: r.role as ProjectRole,
   createdAt: r.created_at as string,
   updatedAt: r.updated_at as string,
+});
+
+export const toMember = (r: Row): Member => ({
+  projectId: r.project_id as string,
+  userId: r.user_id as string,
+  name: r.name as string,
+  email: r.email as string,
+  role: r.role as ProjectRole,
+  createdAt: r.created_at as string,
 });
 
 export const toTask = (r: Row): Task => ({
@@ -77,6 +90,34 @@ export const TASK_SELECT = `
 export const COMMENT_SELECT = `
   SELECT c.*, u.name AS author_name
   FROM comments c JOIN users u ON u.id = c.author_id`;
+
+/** Projects joined with the viewer's membership; bind the user id first. */
+export const PROJECT_SELECT = `
+  SELECT p.*, m.role
+  FROM projects p JOIN project_members m ON m.project_id = p.id AND m.user_id = ?`;
+
+export const MEMBER_SELECT = `
+  SELECT m.*, u.name, u.email
+  FROM project_members m JOIN users u ON u.id = m.user_id`;
+
+export function getProjectForUser(db: DB, projectId: string, userId: string): Project | undefined {
+  const row = db.prepare(`${PROJECT_SELECT} WHERE p.id = ?`).get(userId, projectId) as Row | undefined;
+  return row && toProject(row);
+}
+
+export function getMemberRole(db: DB, projectId: string, userId: string): ProjectRole | undefined {
+  const row = db
+    .prepare(`SELECT role FROM project_members WHERE project_id = ? AND user_id = ?`)
+    .get(projectId, userId) as { role: ProjectRole } | undefined;
+  return row?.role;
+}
+
+export function getMember(db: DB, projectId: string, userId: string): Member | undefined {
+  const row = db.prepare(`${MEMBER_SELECT} WHERE m.project_id = ? AND m.user_id = ?`).get(projectId, userId) as
+    | Row
+    | undefined;
+  return row && toMember(row);
+}
 
 export function getTask(db: DB, id: string): Task | undefined {
   const row = db.prepare(`${TASK_SELECT} WHERE t.id = ?`).get(id) as Row | undefined;
