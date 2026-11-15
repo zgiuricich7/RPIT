@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { hasRole, type ProjectRole } from "@rpit/shared";
+import { hasRole, positionBetween, type ProjectRole } from "@rpit/shared";
 import type {
   ActivityPage,
   Comment,
@@ -18,6 +18,7 @@ import type {
   RegisterInput,
   Task,
   TaskInput,
+  TaskMove,
   TaskPatch,
   TestCase,
   TestCaseInput,
@@ -222,6 +223,48 @@ export function useUpdateTask(projectId: string) {
       qc.setQueryData<Task[]>(keys.tasks(projectId), (list) =>
         list?.map((t) => (t.id === id ? { ...t, ...patch } : t)),
       );
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => ctx?.prev && qc.setQueryData(keys.tasks(projectId), ctx.prev),
+    onSettled: () => invalidateProject(qc, projectId),
+  });
+}
+
+/**
+ * Drag and drop (see TaskMove). Applies the move to the cached list right away,
+ * re-sorted by position so the list and board show the new order before the
+ * server answers; the refetch afterwards replaces the estimate.
+ */
+export function useMoveTask(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...move }: TaskMove & { id: string }) =>
+      api<Task>(`/tasks/${id}/move`, { method: "POST", body: move }),
+    onMutate: async ({ id, ...move }) => {
+      await qc.cancelQueries({ queryKey: keys.tasks(projectId) });
+      const prev = qc.getQueryData<Task[]>(keys.tasks(projectId));
+      qc.setQueryData<Task[]>(keys.tasks(projectId), (list) => {
+        if (!list) return list;
+        const cur = list.find((t) => t.id === id);
+        if (!cur) return list;
+        const pos = (nid: string | null | undefined) => list.find((t) => t.id === nid)?.position;
+        const parentId = move.parentId === undefined ? cur.parentId : move.parentId;
+        let position = cur.position;
+        if (move.afterId || move.beforeId) {
+          // A gap too small to split is renumbered by the server; the refetch fixes the order.
+          position = positionBetween(pos(move.afterId), pos(move.beforeId)) ?? (pos(move.afterId) ?? 0) + 1e-9;
+        } else if (parentId !== cur.parentId) {
+          position = Math.max(0, ...list.map((t) => t.position)) + 1;
+        }
+        const next = list.map((t) => (t.id === id ? { ...t, parentId, status: move.status ?? t.status, position } : t));
+        // Same order as the server: position, then created_at, then id.
+        return next.sort(
+          (a, b) =>
+            a.position - b.position ||
+            a.createdAt.localeCompare(b.createdAt) ||
+            (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+        );
+      });
       return { prev };
     },
     onError: (_e, _v, ctx) => ctx?.prev && qc.setQueryData(keys.tasks(projectId), ctx.prev),

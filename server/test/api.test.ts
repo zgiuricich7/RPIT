@@ -701,3 +701,117 @@ describe("due-date reminders", () => {
     expect(log[0].diff).toEqual({ remindAssignee: { from: false, to: true } });
   });
 });
+
+describe("moving tasks (drag and drop)", () => {
+  const mk = async (title: string, parentId: string | null = null) =>
+    (await ctx.agent.post(`/api/projects/${ctx.projectId}/tasks`).send({ title, parentId }).expect(201)).body as {
+      id: string;
+      position: number;
+    };
+  const move = (id: string, body: Record<string, unknown>, status = 200) =>
+    ctx.agent.post(`/api/tasks/${id}/move`).send(body).expect(status);
+  /** Titles of the project's tasks in rank order, optionally only children of `parentId`. */
+  const order = async (parentId?: string | null) => {
+    const list = (await ctx.agent.get(`/api/projects/${ctx.projectId}/tasks`).expect(200)).body as {
+      title: string;
+      parentId: string | null;
+    }[];
+    return list.filter((t) => parentId === undefined || t.parentId === parentId).map((t) => t.title);
+  };
+
+  it("gives new tasks a project-wide rank, last everywhere", async () => {
+    const a = await mk("A");
+    const a1 = await mk("A1", a.id);
+    const b = await mk("B");
+    expect(a.position < a1.position && a1.position < b.position).toBe(true);
+  });
+
+  it("reorders between neighbours without logging, but logs parent and status changes", async () => {
+    const a = await mk("A");
+    const b = await mk("B");
+    const c = await mk("C");
+    await move(c.id, { afterId: a.id, beforeId: b.id });
+    expect(await order()).toEqual(["A", "C", "B"]);
+    await move(a.id, { afterId: b.id });
+    expect(await order()).toEqual(["C", "B", "A"]);
+    await move(b.id, { beforeId: c.id });
+    expect(await order()).toEqual(["B", "C", "A"]);
+
+    const log = (await ctx.agent.get(`/api/tasks/${c.id}/activity`).expect(200)).body.items;
+    expect(log.map((e: { action: string }) => e.action)).toEqual(["created"]);
+
+    // Nest C under B, last among B's children, and move it to In progress, in one step.
+    const moved = (await move(c.id, { parentId: b.id, status: "in_progress" })).body;
+    expect(moved).toMatchObject({ parentId: b.id, status: "in_progress" });
+    expect(await order(b.id)).toEqual(["C"]);
+    const after = (await ctx.agent.get(`/api/tasks/${c.id}/activity`).expect(200)).body.items;
+    expect(after[0].diff).toEqual({
+      status: { from: "todo", to: "in_progress" },
+      parentId: { from: null, to: b.id },
+    });
+  });
+
+  it("nests between new siblings and un-nests to the top level", async () => {
+    const p = await mk("P");
+    const x = await mk("X", p.id);
+    const y = await mk("Y", p.id);
+    const z = await mk("Z");
+    await move(z.id, { parentId: p.id, afterId: x.id, beforeId: y.id });
+    expect(await order(p.id)).toEqual(["X", "Z", "Y"]);
+    await move(x.id, { parentId: null, afterId: p.id });
+    expect(await order(null)).toEqual(["P", "X"]);
+    expect(await order(p.id)).toEqual(["Z", "Y"]);
+  });
+
+  it("renumbers when a gap is too small to split", async () => {
+    const a = await mk("A");
+    const b = await mk("B");
+    // Repeatedly insert right after A: halving the gap each time until it runs out.
+    let prev = b.id;
+    for (let i = 0; i < 60; i++) {
+      const t = await mk(`N${i}`);
+      await move(t.id, { afterId: a.id, beforeId: prev });
+      prev = t.id;
+    }
+    const titles = await order();
+    expect(titles[0]).toBe("A");
+    expect(titles[1]).toBe("N59");
+    expect(titles.at(-1)).toBe("B");
+    expect(new Set(titles).size).toBe(62);
+  });
+
+  it("rejects cycles and neighbours or parents from another project", async () => {
+    const a = await mk("A");
+    const b = await mk("B", a.id);
+    await move(a.id, { parentId: b.id }, 400);
+    await move(a.id, { afterId: a.id }, 400);
+
+    const other = (await ctx.agent.post("/api/projects").send({ name: "P2" }).expect(201)).body;
+    const foreign = (await ctx.agent.post(`/api/projects/${other.id}/tasks`).send({ title: "F" }).expect(201)).body;
+    await move(a.id, { afterId: foreign.id }, 400);
+    await move(a.id, { parentId: foreign.id }, 400);
+  });
+
+  it("orders tied positions deterministically, by id", async () => {
+    const tasks = [await mk("A"), await mk("B"), await mk("C")];
+    ctx.db.prepare(`UPDATE tasks SET position = 1, created_at = '2026-01-01T00:00:00.000Z'`).run();
+    const expected = [...tasks].sort((x, y) => (x.id < y.id ? -1 : 1)).map((t) => t.id);
+    for (let i = 0; i < 3; i++) {
+      const list = (await ctx.agent.get(`/api/projects/${ctx.projectId}/tasks`).expect(200)).body as { id: string }[];
+      expect(list.map((t) => t.id)).toEqual(expected);
+    }
+    // Neighbours that tie can't be split: the server renumbers, then places the task between them.
+    const [first, second, third] = expected;
+    await move(third!, { afterId: first, beforeId: second });
+    const after = (await ctx.agent.get(`/api/projects/${ctx.projectId}/tasks`).expect(200)).body as { id: string }[];
+    expect(after.map((t) => t.id)).toEqual([first, third, second]);
+  });
+
+  it("lets editors move tasks but not viewers", async () => {
+    const a = await mk("A");
+    const b = await mk("B");
+    const viewer = await signUp(ctx.db, "Vic", "vic@x.com");
+    await ctx.agent.post(`/api/projects/${ctx.projectId}/members`).send({ email: "vic@x.com", role: "viewer" }).expect(201);
+    await viewer.post(`/api/tasks/${b.id}/move`).send({ beforeId: a.id }).expect(403);
+  });
+});

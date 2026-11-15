@@ -136,6 +136,20 @@ export const TaskPatch = z
   .partial()
   .refine(datesInOrder, { message: START_AFTER_DUE, path: ["startDate"] });
 export { START_AFTER_DUE };
+/**
+ * Drag and drop: place a task between two neighbours, optionally under a new
+ * parent and/or in a new status (board column). `afterId` is the task that
+ * should come right before it and `beforeId` the one right after, in whatever
+ * list the user dropped into (its new siblings, or a board column). Omit both
+ * to keep its place. Omitted `parentId` / `status` are left unchanged.
+ */
+export const TaskMove = z.object({
+  parentId: nullableId.optional(),
+  status: TaskStatus.optional(),
+  afterId: nullableId.optional(),
+  beforeId: nullableId.optional(),
+});
+export type TaskMove = z.infer<typeof TaskMove>;
 export type TaskInput = z.input<typeof TaskInput>;
 export type TaskPatch = z.infer<typeof TaskPatch>;
 

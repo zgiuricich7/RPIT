@@ -1,5 +1,14 @@
 import { Router } from "express";
-import { CommentInput, CommentPatch, START_AFTER_DUE, TaskInput, TaskPatch, type Task } from "@rpit/shared";
+import {
+  CommentInput,
+  CommentPatch,
+  positionBetween,
+  START_AFTER_DUE,
+  TaskInput,
+  TaskMove,
+  TaskPatch,
+  type Task,
+} from "@rpit/shared";
 import type { DB } from "../db/index.ts";
 import { newId, now, transaction } from "../db/index.ts";
 import { COMMENT_SELECT, getMemberRole, getTask, listTasks, toComment, toTestCase, wouldCreateCycle } from "../db/repo.ts";
@@ -8,6 +17,7 @@ import { currentUser } from "../auth.ts";
 import { byComment, byTask, currentProject, requireProjectRole } from "../access.ts";
 import { notifyAssignment, recordCommentActivity, recordCommentEdit } from "../notify.ts";
 import { changes, logActivity, snapshot, TASK_FIELDS } from "../activity.ts";
+import { publishEvent } from "../events.ts";
 import { activityPage } from "./activity.ts";
 
 /** Assignees must be members of the project. */
@@ -36,11 +46,29 @@ export function taskRoutes(db: DB) {
     const p = getTask(db, parentId);
     if (!p || p.projectId !== projectId) throw new HttpError(400, "Parent task must be in the same project");
   };
-  const nextPosition = (projectId: string, parentId: string | null) => {
+  /**
+   * Position is one rank across the whole project (see positionBetween), so a
+   * new or re-parented task goes after every other task: last among its
+   * siblings and last in its board column.
+   */
+  const nextPosition = (projectId: string) => {
     const row = db
-      .prepare(`SELECT COALESCE(MAX(position), 0) + 1 AS pos FROM tasks WHERE project_id = ? AND parent_id IS ?`)
-      .get(projectId, parentId) as { pos: number };
+      .prepare(`SELECT COALESCE(MAX(position), 0) + 1 AS pos FROM tasks WHERE project_id = ?`)
+      .get(projectId) as { pos: number };
     return row.pos;
+  };
+  /** Renumber the project's tasks 1..n in their current order, when a gap gets too small to split. */
+  const renumber = (projectId: string) => {
+    const ids = db
+      .prepare(`SELECT id FROM tasks WHERE project_id = ? ORDER BY position, created_at, id`)
+      .all(projectId) as { id: string }[];
+    const set = db.prepare(`UPDATE tasks SET position = ? WHERE id = ?`);
+    ids.forEach((r, i) => set.run(i + 1, r.id));
+  };
+  const checkCycle = (id: string, parentId: string | null) => {
+    if (parentId && wouldCreateCycle(db, id, parentId)) {
+      throw new HttpError(400, "A task can't be moved under itself or one of its subtasks");
+    }
   };
 
   byProject.get("/", can("viewer"), (req, res) => {
@@ -71,7 +99,7 @@ export function taskRoutes(db: DB) {
         input.startDate,
         input.dueDate,
         input.remindAssignee ? 1 : 0,
-        nextPosition(projectId, input.parentId),
+        nextPosition(projectId),
       );
       const t = requireTask(id);
       logActivity(db, { ...taskEntry(t), actorId, action: "created", diff: snapshot(t, TASK_FIELDS, "created") });
@@ -98,10 +126,8 @@ export function taskRoutes(db: DB) {
     let position = cur.position;
     if (p.parentId !== undefined && p.parentId !== cur.parentId) {
       checkParent(cur.projectId, p.parentId);
-      if (p.parentId && wouldCreateCycle(db, id, p.parentId)) {
-        throw new HttpError(400, "A task can't be moved under itself or one of its subtasks");
-      }
-      position = nextPosition(cur.projectId, p.parentId);
+      checkCycle(id, p.parentId);
+      position = nextPosition(cur.projectId);
     }
     if (p.assigneeId !== undefined && p.assigneeId !== cur.assigneeId) checkAssignee(db, cur.projectId, p.assigneeId);
     const merged = { ...cur, ...p, position };
@@ -136,6 +162,64 @@ export function taskRoutes(db: DB) {
         cur.assigneeId,
         merged.assigneeId,
       );
+      return t;
+    });
+    res.json(task);
+  });
+
+  /**
+   * Drag and drop: re-parent, change status and/or reorder in one step (see
+   * TaskMove). Parent and status changes are logged like any edit; a pure
+   * reorder isn't audited (position is internal) but is still published so
+   * other open clients see the new order.
+   */
+  byId.post("/:taskId/move", can("editor", byTask), (req, res) => {
+    const id = param(req, "taskId");
+    const actorId = currentUser(req).id;
+    const cur = requireTask(id);
+    const m = parseBody(TaskMove, req.body);
+    const parentId = m.parentId === undefined ? cur.parentId : m.parentId;
+    if (parentId !== cur.parentId) {
+      checkParent(cur.projectId, parentId);
+      checkCycle(id, parentId);
+    }
+    const neighbour = (nid: string | null | undefined) => {
+      if (!nid) return null;
+      const t = nid === id ? undefined : getTask(db, nid);
+      if (!t || t.projectId !== cur.projectId) throw new HttpError(400, "Can't place a task next to that task");
+      return t;
+    };
+    neighbour(m.afterId);
+    neighbour(m.beforeId);
+
+    const task = transaction(db, () => {
+      let position = cur.position;
+      if (m.afterId || m.beforeId) {
+        // Read neighbours' positions inside the transaction; renumber once if they're too close to split.
+        const place = () => positionBetween(neighbour(m.afterId)?.position, neighbour(m.beforeId)?.position);
+        let next = place();
+        if (next === null) {
+          renumber(cur.projectId);
+          next = place() ?? (neighbour(m.afterId)?.position ?? 0) + 0.5;
+        }
+        position = next;
+      } else if (parentId !== cur.parentId) {
+        position = nextPosition(cur.projectId);
+      }
+      db.prepare(`UPDATE tasks SET parent_id = ?, status = ?, position = ?, updated_at = ? WHERE id = ?`).run(
+        parentId,
+        m.status ?? cur.status,
+        position,
+        now(),
+        id,
+      );
+      const t = requireTask(id);
+      const diff = changes(cur, t, TASK_FIELDS);
+      if (Object.keys(diff).length) {
+        logActivity(db, { ...taskEntry(t), actorId, action: "updated", diff });
+      } else if (t.position !== cur.position) {
+        publishEvent(db, { projectId: t.projectId, actorId, entity: "task", entityId: id, taskId: id, action: "updated" });
+      }
       return t;
     });
     res.json(task);

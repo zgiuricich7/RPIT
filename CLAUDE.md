@@ -26,6 +26,7 @@ Always run `npm run typecheck && npm test` before considering a change done.
 ```
 shared/   @rpit/shared — zod schemas, enums, labels, response types, tree utils, mention parsing,
           calendar-date helpers (dates.ts: due state, due filters, sibling sort comparators),
+          list drag-to-nest projection (treeDrag.ts: flattenTree, projectTreeDrop),
           Markdown toolbar text transforms (markdown.ts, pure functions with tests).
           Imported as TypeScript source by both server and web (no build step).
 server/   Express 5 API on Node's built-in SQLite (node:sqlite, no native deps)
@@ -52,6 +53,7 @@ web/      React 19 + Vite + TanStack Query + React Router 7
   src/components/TopBar.tsx    header with project switcher and inbox badge
   src/components/activity.tsx  ActivityFeed: renders log entries as sentences + field changes
   src/pages/          Overview, Tasks (List + Board, due filter and sort in ?due= / ?sort=), Tests, Members, Inbox, Auth
+  src/pages/taskViews.tsx  List and Board views with @dnd-kit drag and drop (mouse, touch, keyboard)
   src/styles.css      design tokens (light/dark) and all styles; plain CSS, no framework
 docs/ROADMAP.md       prioritised backlog
 ```
@@ -97,6 +99,13 @@ docs/ROADMAP.md       prioritised backlog
   into `Date`s for logic (time zones shift them). Overdue = due before today and not done (`dueState` /
   `isOverdue` in `shared/src/dates.ts`, with the local date from `useToday()`). The server never decides what's
   overdue. Show due dates with `<DueDate>` (`web/src/components/ui.tsx`) and `formatDate` for plain dates.
+- **Task order is one project-wide rank.** `tasks.position` (REAL) orders siblings in the list *and* cards in
+  board columns. New and re-parented tasks get `MAX(position) + 1` across the project. Drag and drop calls
+  `POST /api/tasks/:id/move` (`TaskMove`: optional `parentId`, `status`, and the drop's `afterId` / `beforeId`
+  neighbours); the server places it with `positionBetween` and renumbers the project when a gap is too small.
+  A pure reorder isn't audited (position is internal) but publishes a real-time event directly; parent and
+  status changes from a move are logged as usual. Dragging is only enabled in manual order (and, in the list,
+  with no due filter); a sorted board still allows moving cards between columns.
 - **Progress = leaf tasks done / leaf tasks** (tasks with no children). Use `leafProgress` from shared;
   the server's `projectSummary` uses the same function, so overview numbers match the UI.
 - **Cache invalidation:** task/test/comment mutations invalidate `["project", projectId]`, which covers
@@ -130,8 +139,8 @@ docs/ROADMAP.md       prioritised backlog
   `/api/notifications` is user-scoped (ownership check, not `requireProjectRole`); the web polls it every 30s
   under the `["notifications"]` key.
 - **Real-time updates come from the activity log.** `logActivity` queues a `ProjectEvent` with `afterCommit`
-  (`server/src/db/index.ts`), so only committed writes are published, and an unaudited write is also invisible
-  to other clients. Events carry ids only, never data: clients refetch through the normal access-checked API.
+  (`server/src/db/index.ts`), so only committed writes are published. A write that's deliberately not audited
+  (only task reorders, so far) must call `publishEvent` itself, or other clients won't see it. Events carry ids only, never data: clients refetch through the normal access-checked API.
   The web opens the stream in `ProjectLayout` via `useProjectEvents`, which batches events and invalidates
   `["project", id]`, `["task", taskId]`, `["notifications"]` (and `["projects"]` for project/member events).
   Each tab sends `X-RPIT-Client` (`CLIENT_ID` in `web/src/api/client.ts`) so its own writes aren't echoed back.
@@ -152,5 +161,5 @@ docs/ROADMAP.md       prioritised backlog
 - Notifications are not emailed.
 - The activity log covers project-scoped actions only: sign-ins, sign-ups and inbox read state aren't logged.
   Rows for deleted projects are kept but no API exposes them.
-- Board drag-and-drop uses native HTML5 DnD (no touch support, no reordering within a column).
+- Keyboard drag and drop reorders but can't nest or un-nest in the list (use the task dialog's parent picker).
 - SQLite single file; fine for a team on one server. Postgres is on the roadmap.

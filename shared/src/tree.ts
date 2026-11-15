@@ -108,3 +108,21 @@ export function matchesWithAncestors<T extends TreeTask>(tasks: T[], matches: (t
   }
   return out;
 }
+
+/**
+ * Task order is one project-wide rank: `position` is a REAL, and sibling order
+ * (list) and column order (board) are both "sort by position". Dropping a task
+ * between two neighbours gives it a position strictly between theirs.
+ * Returns null when there are no neighbours (keep the current position), and
+ * also when the gap is too small to split (or the neighbours are out of order):
+ * the server then renumbers the project and tries again.
+ */
+export function positionBetween(after: number | null | undefined, before: number | null | undefined): number | null {
+  const a = after ?? null;
+  const b = before ?? null;
+  if (a === null && b === null) return null;
+  if (a === null) return b! - 1;
+  if (b === null) return a + 1;
+  const mid = (a + b) / 2;
+  return a < mid && mid < b ? mid : null;
+}

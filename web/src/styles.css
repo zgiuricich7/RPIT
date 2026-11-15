@@ -147,9 +147,13 @@ table.grid {
 .column h3 { font-size: 13px; display: flex; justify-content: space-between; margin-bottom: 10px; }
 .card {
   background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--prio, var(--line));
-  border-radius: var(--radius); padding: 10px; margin-bottom: 8px; cursor: grab;
+  border-radius: var(--radius); padding: 10px; margin-bottom: 8px;
 }
-.card.dragging { opacity: 0.5; }
+.card-slot { margin-bottom: 8px; touch-action: manipulation; border-radius: var(--radius); }
+.card-slot .card { margin-bottom: 0; }
+.card-slot:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.card-slot.dragging { opacity: 0.4; }
+.card-slot[aria-disabled="false"] { cursor: grab; }
 .card .crumb { font-size: 11px; color: var(--mute); margin-bottom: 3px; }
 .card .meta { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 12px; color: var(--mute); gap: 8px; }
 .p-high { --prio: var(--fail); }
@@ -353,3 +357,15 @@ fieldset:disabled .md-tools button { cursor: default; }
 .due.overdue::before { content: "! "; }
 tr.context td { opacity: 0.55; }
 .card .card-due { font-size: 12px; color: var(--mute); margin-top: 6px; }
+
+/* ---------- Drag and drop ---------- */
+.drag-handle {
+  width: 22px; height: 26px; flex: none; border: 0; border-radius: 4px; background: none;
+  color: var(--mute); cursor: grab; font-size: 14px; line-height: 1; touch-action: none;
+}
+.drag-handle:hover { background: color-mix(in srgb, var(--line) 60%, transparent); color: var(--ink); }
+.drag-handle:focus-visible { outline: 2px solid var(--acc); }
+tr.dragging { position: relative; z-index: 1; background: var(--surface); box-shadow: 0 2px 10px rgb(0 0 0 / 0.15); }
+tr.dragging td { opacity: 0.85; }
+.toolbar .hint { font-size: 12px; }
+@media (max-width: 700px) { .drag-handle { width: 32px; height: 32px; } }

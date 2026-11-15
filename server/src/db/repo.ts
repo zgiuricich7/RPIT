@@ -193,7 +193,8 @@ export function getTask(db: DB, id: string): Task | undefined {
 export function listTasks(db: DB, projectId: string): Task[] {
   return (
     db
-      .prepare(`${TASK_SELECT} WHERE t.project_id = ? ORDER BY t.position, t.created_at`)
+      // Positions can tie (they're a rank, not unique): id makes the order deterministic, matching renumber().
+      .prepare(`${TASK_SELECT} WHERE t.project_id = ? ORDER BY t.position, t.created_at, t.id`)
       .all(projectId) as Row[]
   ).map(toTask);
 }

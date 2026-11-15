@@ -31,9 +31,10 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
     reminders (in-app) to the assignee on the start date, the day before it's due and on the due date.
     Follow-up: reminders in the viewer's time zone (they use the server's date), emailed reminders (4.3),
     dates on test cases, and a timeline view from start and due dates.
-2.2 **Reorder and re-parent by drag.** Swap native DnD for `@dnd-kit` (touch support), reorder
-    within board columns and drag rows in the list to nest/un-nest. `position` is a REAL so you can
-    insert between neighbours without renumbering.
+2.2 ~~**Reorder and re-parent by drag.**~~ Done: `@dnd-kit` (mouse, touch, keyboard) on the board and list;
+    reorder within and between board columns, drag list rows to reorder and sideways to nest/un-nest.
+    `POST /api/tasks/:id/move` places a task between neighbours in one project-wide `position` rank.
+    Follow-up: keyboard nesting in the list, multi-select drag, and auto-expanding a collapsed row on hover.
 2.3 **Filters and search** on list and board: assignee, priority, status, text. Persist in URL.
 2.4 **Labels/tags** per project.
 2.5 **Status roll-up option**: automatically set a parent to Done when all children are done.
