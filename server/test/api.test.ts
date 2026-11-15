@@ -564,3 +564,54 @@ describe("partial updates", () => {
     expect(p).toMatchObject({ name: "New", description: "About" });
   });
 });
+
+describe("editing comments", () => {
+  it("lets authors edit, marks the comment edited, and logs the change", async () => {
+    const { db, agent, projectId } = ctx;
+    const t = (await agent.post(`/api/projects/${projectId}/tasks`).send({ title: "A" })).body;
+    const c = (await agent.post(`/api/tasks/${t.id}/comments`).send({ body: "First **draft**" })).body;
+    expect(c.editedAt).toBeNull();
+
+    const same = (await agent.patch(`/api/comments/${c.id}`).send({ body: "First **draft**" }).expect(200)).body;
+    expect(same.editedAt).toBeNull(); // an unchanged body is not an edit
+
+    const edited = (await agent.patch(`/api/comments/${c.id}`).send({ body: "Final _text_" }).expect(200)).body;
+    expect(edited).toMatchObject({ id: c.id, body: "Final _text_", editedAt: expect.any(String) });
+    expect((await agent.get(`/api/tasks/${t.id}/comments`)).body[0]).toMatchObject({ body: "Final _text_" });
+    await agent.patch(`/api/comments/${c.id}`).send({ body: " " }).expect(400);
+
+    const log = (await agent.get(`/api/tasks/${t.id}/activity`)).body.items;
+    expect(log[0]).toMatchObject({
+      entity: "comment",
+      action: "updated",
+      diff: { body: { from: "First **draft**", to: "Final _text_" } },
+    });
+    expect(log.filter((e: { action: string }) => e.action === "updated")).toHaveLength(1);
+
+    const ed = await signUp(db, "Ed", "e@x.com");
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "e@x.com" });
+    await ed.patch(`/api/comments/${c.id}`).send({ body: "Hijacked" }).expect(403);
+    const outsider = await signUp(db, "Out", "o@x.com");
+    await outsider.patch(`/api/comments/${c.id}`).send({ body: "Hijacked" }).expect(404);
+  });
+
+  it("updates mentions and notifies only newly mentioned people", async () => {
+    const { db, agent, projectId } = ctx;
+    const bea = await signUp(db, "Bea", "bea@x.com");
+    const cal = await signUp(db, "Cal", "cal@x.com");
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "bea@x.com" });
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "cal@x.com" });
+    const t = (await agent.post(`/api/projects/${projectId}/tasks`).send({ title: "A" })).body;
+    const c = (await agent.post(`/api/tasks/${t.id}/comments`).send({ body: "@Bea look" })).body;
+
+    const edited = (await agent.patch(`/api/comments/${c.id}`).send({ body: "@Bea and @Cal look" })).body;
+    expect(edited.mentions.map((m: { name: string }) => m.name).sort()).toEqual(["Bea", "Cal"]);
+    const kinds = async (a: typeof bea) =>
+      ((await a.get("/api/notifications")).body.items as { kind: string }[]).map((n) => n.kind);
+    expect(await kinds(bea)).toEqual(["mention"]); // not notified a second time
+    expect(await kinds(cal)).toEqual(["mention"]);
+
+    const dropped = (await agent.patch(`/api/comments/${c.id}`).send({ body: "Never mind" })).body;
+    expect(dropped.mentions).toEqual([]);
+  });
+});

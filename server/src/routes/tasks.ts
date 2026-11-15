@@ -1,12 +1,12 @@
 import { Router } from "express";
-import { CommentInput, TaskInput, TaskPatch, type Task } from "@rpit/shared";
+import { CommentInput, CommentPatch, TaskInput, TaskPatch, type Task } from "@rpit/shared";
 import type { DB } from "../db/index.ts";
 import { newId, now, transaction } from "../db/index.ts";
 import { COMMENT_SELECT, getMemberRole, getTask, listTasks, toComment, toTestCase, wouldCreateCycle } from "../db/repo.ts";
 import { HttpError, notFound, param, parseBody } from "../http.ts";
 import { currentUser } from "../auth.ts";
 import { byComment, byTask, currentProject, requireProjectRole } from "../access.ts";
-import { notifyAssignment, recordCommentActivity } from "../notify.ts";
+import { notifyAssignment, recordCommentActivity, recordCommentEdit } from "../notify.ts";
 import { changes, logActivity, snapshot, TASK_FIELDS } from "../activity.ts";
 import { activityPage } from "./activity.ts";
 
@@ -211,14 +211,45 @@ export function taskRoutes(db: DB) {
 export function commentRoutes(db: DB) {
   const r = Router();
   const can = requireProjectRole(db);
+  const ownComment = (id: string, actorId: string, verb: "edit" | "delete") => {
+    const row = db
+      .prepare(`SELECT c.author_id, c.task_id, c.body, t.title FROM comments c JOIN tasks t ON t.id = c.task_id WHERE c.id = ?`)
+      .get(id) as { author_id: string; task_id: string; body: string; title: string };
+    if (row.author_id !== actorId) throw new HttpError(403, `You can only ${verb} your own comments`);
+    return row;
+  };
+
+  /** Authors can edit their own comments (any role, since viewers can comment). */
+  r.patch("/:commentId", can("viewer", byComment), (req, res) => {
+    const id = param(req, "commentId");
+    const actorId = currentUser(req).id;
+    const row = ownComment(id, actorId, "edit");
+    const { body } = parseBody(CommentPatch, req.body);
+    if (body !== row.body) {
+      const projectId = currentProject(req).id;
+      transaction(db, () => {
+        db.prepare(`UPDATE comments SET body = ?, edited_at = ? WHERE id = ?`).run(body, now(), id);
+        recordCommentEdit(db, { commentId: id, taskId: row.task_id, projectId, authorId: actorId, body });
+        logActivity(db, {
+          projectId,
+          actorId,
+          entity: "comment",
+          entityId: id,
+          taskId: row.task_id,
+          action: "updated",
+          label: row.title,
+          diff: { body: { from: row.body, to: body } },
+        });
+      });
+    }
+    res.json(toComment(db.prepare(`${COMMENT_SELECT} WHERE c.id = ?`).get(id) as Record<string, unknown>));
+  });
+
   /** Any member may delete their own comments. */
   r.delete("/:commentId", can("viewer", byComment), (req, res) => {
     const id = param(req, "commentId");
     const actorId = currentUser(req).id;
-    const row = db
-      .prepare(`SELECT c.author_id, c.task_id, c.body, t.title FROM comments c JOIN tasks t ON t.id = c.task_id WHERE c.id = ?`)
-      .get(id) as { author_id: string; task_id: string; body: string; title: string };
-    if (row.author_id !== actorId) throw new HttpError(403, "You can only delete your own comments");
+    const row = ownComment(id, actorId, "delete");
     transaction(db, () => {
       logActivity(db, {
         projectId: currentProject(req).id,

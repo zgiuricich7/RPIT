@@ -9,7 +9,8 @@ and test case tracking — with a per-project overview dashboard.
 - **Project members** with owner, editor and viewer roles; invite teammates by email
 - **Unlimited subtask nesting** with progress roll-ups (measured on tasks that have no subtasks)
 - **List view** (collapsible tree) and **Board view** (drag cards between status columns)
-- **Comments** on every task, with authors and timestamps, and **@-mentions** of project members
+- **Comments** on every task, with authors and timestamps, **@-mentions** of project members, and editing
+- **Markdown** in comments and every description/notes field, with a formatting toolbar and preview
 - **Inbox** of in-app notifications when you're assigned a task or test, mentioned, or someone
   comments on a task you follow
 - **Test cases** with steps, expected result, notes, assignee, priority and a linked task;
@@ -77,7 +78,7 @@ GET    /projects/:id/members     POST /projects/:id/members   (invite by email)
 PATCH/DELETE /projects/:id/members/:userId
 GET    /projects/:id/tasks       POST /projects/:id/tasks
 GET    /tasks/:id                PATCH/DELETE /tasks/:id
-GET    /tasks/:id/comments       POST /tasks/:id/comments      DELETE /comments/:id
+GET    /tasks/:id/comments       POST /tasks/:id/comments      PATCH/DELETE /comments/:id
 GET    /notifications            PATCH /notifications/:id      POST /notifications/read-all
 GET    /projects/:id/tests       POST /projects/:id/tests
 GET    /tests/:id                PATCH/DELETE /tests/:id

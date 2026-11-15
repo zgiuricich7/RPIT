@@ -15,7 +15,9 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
 1.4 ~~**Activity log.**~~ Done: append-only audit log of every project-scoped write with field diffs;
     project feed on the overview and history in task and test dialogs. Follow-up: log auth events
     (sign-in, failed sign-in), an owner-only export (CSV/JSON), and a way to view deleted projects' logs.
-1.5 **Edit comments**, with an "edited" marker. Optionally Markdown rendering.
+1.5 ~~**Edit comments**~~ Done: authors edit their comments ("edited" marker, logged, new mentions
+    notified). All free text renders GitHub-flavoured Markdown with a formatting toolbar.
+    Follow-up: comment edit history view, image uploads (see 2.6), and ignoring @-mentions inside code.
 1.6 **Real-time updates.** Server-sent events per project that invalidate TanStack Query keys.
 
 ## 2. Tasks

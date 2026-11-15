@@ -1,7 +1,7 @@
 # RPIT — Recursive Project and Integration Tracker
 
 Project management web app: projects contain infinitely nested tasks (list tree + Kanban board),
-threaded comments on tasks (with @-mentions), test cases that can be linked to tasks, assigned and tracked,
+editable Markdown comments on tasks (with @-mentions), test cases that can be linked to tasks, assigned and tracked,
 an in-app inbox of notifications, and an append-only activity (audit) log.
 Each project has an overview dashboard summarising completion and test status.
 
@@ -24,7 +24,8 @@ Always run `npm run typecheck && npm test` before considering a change done.
 ## Layout
 
 ```
-shared/   @rpit/shared — zod schemas, enums, labels, response types, tree utils.
+shared/   @rpit/shared — zod schemas, enums, labels, response types, tree utils, mention parsing,
+          Markdown toolbar text transforms (markdown.ts, pure functions with tests).
           Imported as TypeScript source by both server and web (no build step).
 server/   Express 5 API on Node's built-in SQLite (node:sqlite, no native deps)
   src/app.ts          createApp(db) — mounts all routes; used by index.ts and tests
@@ -40,7 +41,9 @@ web/      React 19 + Vite + TanStack Query + React Router 7
   src/api/client.ts   fetch wrapper (throws ApiRequestError with fieldErrors)
   src/api/hooks.ts    every query/mutation hook + query keys
   src/components/dialogs.tsx  URL-driven task/test dialogs (?task=<id>, ?test=<id>) + comments UI
-  src/components/mentions.tsx  highlighted comment body + @-mention autocomplete textarea
+  src/components/markdown.tsx  MarkdownView (safe rendering + mention highlights), MarkdownEditor (toolbar,
+                               Write/Preview, shortcuts), CommentBody
+  src/components/mentions.tsx  @-mention autocomplete textarea (used by MarkdownEditor)
   src/components/TopBar.tsx    header with project switcher and inbox badge
   src/components/activity.tsx  ActivityFeed: renders log entries as sentences + field changes
   src/pages/          Overview, Tasks (List + Board), Tests, Members, Inbox, Auth
@@ -55,7 +58,7 @@ docs/ROADMAP.md       prioritised backlog
   zod enum). Both FKs cascade. The project creator becomes owner; every project keeps at least one owner.
 - `tasks.parent_id → tasks.id` (nullable, `ON DELETE CASCADE`) gives unlimited nesting.
   Deleting a task deletes its whole subtree and their comments.
-- `comments.task_id → tasks.id` (cascade), `comments.author_id → users.id`
+- `comments.task_id → tasks.id` (cascade), `comments.author_id → users.id`; `edited_at` is set when the author edits
 - `test_cases.task_id → tasks.id` (`ON DELETE SET NULL`) — deleting a task unlinks tests, never deletes them.
 - `assignee_id` columns reference `users` with `SET NULL`.
 - `comment_mentions(comment_id, user_id)` — who a comment @-mentioned, computed once when it's posted.
@@ -85,13 +88,17 @@ docs/ROADMAP.md       prioritised backlog
 - **Cache invalidation:** task/test/comment mutations invalidate `["project", projectId]`, which covers
   tasks, tests, summary and recent comments. New project-scoped queries should live under that prefix.
 - **Dialogs are URL state.** Open with `useDialogs().openTask(id)` / `newTask(parentId)` etc., not local state.
+- **Free text is Markdown** (comments, task/project descriptions, test steps/expected/notes). Edit with
+  `MarkdownEditor`, display with `MarkdownView`; never render user text with `dangerouslySetInnerHTML`.
+  Rendering is GitHub-flavoured, ignores raw HTML, and shows images as links (no third-party loads). Use
+  `markdownToPlainText` for one-line previews. Stored text is the raw Markdown; the server doesn't parse it.
 - UI copy: sentence case, plain verbs, buttons say what they do ("Save task", "Post comment").
 - Every route except `/api/health` and `/api/auth/*` requires a session (`requireUser`).
 - **Every project-scoped route checks the caller's role** with `requireProjectRole` (`server/src/access.ts`):
   `const can = requireProjectRole(db); r.patch("/:taskId", can("editor", byTask), handler)`. Resolvers
   (`byProject`, `byTask`, `byTestCase`, `byComment`) map a route param to its project. Non-members get 404,
   members below the required role get 403. Viewers read and comment; editors also write tasks and tests;
-  owners also edit/delete the project and manage members. Comment authors can delete their own comments. Assignees must be project members (`checkAssignee`).
+  owners also edit/delete the project and manage members. Comment authors can edit and delete their own comments. Assignees must be project members (`checkAssignee`).
 - On the web, `useProjectRole(projectId)` / `project.role` only hide controls; the server is the authority.
 - **Mentions** are `@` + a member's full name, parsed by `findMentions` in `shared/src/mentions.ts`. The server
   uses it to store mentions; the web uses it with the stored `comment.mentions` to highlight, so both agree.

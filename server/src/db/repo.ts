@@ -70,6 +70,7 @@ export const toComment = (r: Row): Comment => ({
   body: r.body as string,
   mentions: r.mentions_json ? (JSON.parse(r.mentions_json as string) as CommentMention[]) : [],
   createdAt: r.created_at as string,
+  editedAt: (r.edited_at as string | null) ?? null,
 });
 
 export const toActivity = (r: Row): Activity => ({

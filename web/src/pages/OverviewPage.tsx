@@ -21,7 +21,7 @@ import {
 } from "../api/hooks.ts";
 import { ProjectDialog, useDialogs } from "../components/dialogs.tsx";
 import { ActivityFeed } from "../components/activity.tsx";
-import { CommentBody } from "../components/mentions.tsx";
+import { CommentBody, MarkdownView } from "../components/markdown.tsx";
 import { Meter, Stack, TaskStatusPill, TestStatusPill } from "../components/ui.tsx";
 import { formatDateTime } from "../lib/format.ts";
 import { TEST_COLORS } from "./TestsPage.tsx";
@@ -72,7 +72,6 @@ export function OverviewPage() {
     <>
       <div className="toolbar">
         <h2>{project.name}</h2>
-        <span className="muted">{project.description}</span>
         <span className="spacer" />
         {project.role === "owner" && (
           <>
@@ -85,6 +84,12 @@ export function OverviewPage() {
           </>
         )}
       </div>
+
+      {project.description.trim() && (
+        <div className="project-description">
+          <MarkdownView source={project.description} />
+        </div>
+      )}
 
       {summary && (
         <>

@@ -123,6 +123,9 @@ export const CommentInput = z.object({
   body: z.string().trim().min(1, "Comment can't be empty").max(10_000),
 });
 export type CommentInput = z.infer<typeof CommentInput>;
+/** Editing a comment replaces its body (Markdown). */
+export const CommentPatch = CommentInput;
+export type CommentPatch = z.infer<typeof CommentPatch>;
 
 // ---------- Notifications ----------
 export const NOTIFICATION_KINDS = ["task_assigned", "test_assigned", "mention", "reply"] as const;
@@ -216,10 +219,13 @@ export interface Comment {
   taskId: string;
   authorId: string;
   authorName: string;
+  /** Markdown. */
   body: string;
-  /** Project members @-mentioned in the body when it was posted. */
+  /** Project members @-mentioned in the body (as of the last edit). */
   mentions: CommentMention[];
   createdAt: string;
+  /** Set when the author has edited the comment. */
+  editedAt: string | null;
 }
 
 export interface RecentComment extends Comment {

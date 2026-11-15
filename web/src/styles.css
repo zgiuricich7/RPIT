@@ -76,7 +76,7 @@ input, select, textarea {
   width: 100%;
 }
 select.inline { width: auto; }
-label.field { display: grid; gap: 4px; font-size: 12px; color: var(--mute); }
+label.field, div.field { display: grid; gap: 4px; font-size: 12px; color: var(--mute); }
 label.check { display: flex; align-items: center; gap: 6px; color: var(--mute); }
 label.check input { width: auto; }
 .form-error { color: var(--fail); font-size: 13px; }
@@ -283,3 +283,65 @@ main.inbox { max-width: 820px; }
 details.history > summary { cursor: pointer; font-weight: 600; font-size: 14px; }
 details.history[open] > summary { margin-bottom: 10px; }
 @media (max-width: 700px) { .text-diff { grid-template-columns: 1fr; } }
+
+/* ---------- Markdown ---------- */
+/* Rendered Markdown: compact typography that fits comments, dialogs and panels. */
+.md { color: var(--ink); font-size: 14px; overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+/* Single newlines show as line breaks, like most chat and comment boxes. */
+.md p { margin: 0 0 8px; white-space: pre-line; }
+.comment .md p { margin: 0 0 6px; white-space: pre-line; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 12px 0 6px; line-height: 1.25; }
+.md h1 { font-size: 18px; }
+.md h2 { font-size: 16px; }
+.md h3, .md h4, .md h5, .md h6 { font-size: 14px; }
+.md ul, .md ol { margin: 0 0 8px; padding-left: 22px; }
+.md li + li { margin-top: 2px; }
+.md li > p { margin: 0; }
+.md ul.contains-task-list { list-style: none; padding-left: 4px; }
+.md .task-list-item input { width: auto; margin: 0 6px 0 0; vertical-align: middle; }
+.md blockquote { margin: 0 0 8px; padding: 2px 10px; border-left: 3px solid var(--line); color: var(--mute); }
+.md code {
+  font: 12.5px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: color-mix(in srgb, var(--mute) 14%, transparent); padding: 1px 4px; border-radius: 4px;
+}
+.md pre { margin: 0 0 8px; padding: 8px 10px; background: color-mix(in srgb, var(--mute) 12%, transparent); border-radius: 6px; overflow-x: auto; }
+.md pre code { background: none; padding: 0; white-space: pre; }
+.md table { border-collapse: collapse; margin: 0 0 8px; display: block; overflow-x: auto; max-width: 100%; }
+.md th, .md td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+.md a { overflow-wrap: anywhere; }
+.md-empty { font-size: 13px; }
+.md-readonly { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; }
+
+/* Editor: toolbar + textarea share one bordered box. */
+.md-editor { border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.md-editor:focus-within { border-color: var(--acc); }
+.md-editor textarea { border: 0; border-radius: 0 0 6px 6px; background: transparent; resize: vertical; display: block; }
+.md-editor textarea:focus-visible { outline: none; }
+.md-editor .mention-input { display: block; }
+.md-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 4px;
+  border-bottom: 1px solid var(--line); background: var(--surface); border-radius: 6px 6px 0 0;
+}
+.md-tabs > button { padding: 2px 10px; font-size: 12px; }
+.md-tools { display: flex; gap: 1px; }
+.md-tools + .md-tools { border-left: 1px solid var(--line); padding-left: 6px; }
+.md-tools button {
+  border: 0; background: none; color: var(--mute); font: inherit; font-size: 12px; min-width: 26px; height: 26px;
+  padding: 0 6px; border-radius: 4px; cursor: pointer; white-space: nowrap;
+}
+.md-tools button:hover { background: color-mix(in srgb, var(--acc) 12%, transparent); color: var(--ink); }
+.md-tools button code { font: 12px ui-monospace, Menlo, Consolas, monospace; }
+.md-tools button b, .md-tools button i, .md-tools button s { font-size: 13px; }
+.md-preview { padding: 8px 10px; overflow: auto; }
+.md-hint { font-size: 11px; color: var(--mute); }
+fieldset:disabled .md-tools button { cursor: default; }
+
+.comment .edited { cursor: help; }
+.project-description { margin: -6px 0 14px; max-width: 900px; }
+.project-description .md { color: var(--mute); }
+/* Keep long comments from taking over the overview panel. */
+.panel .comment .md { max-height: 10em; overflow: hidden; }
+@media (max-width: 700px) { .md-tools button { min-width: 32px; height: 32px; } }

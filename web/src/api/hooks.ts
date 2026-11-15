@@ -262,6 +262,18 @@ export function useDeleteComment(projectId: string, taskId: string) {
   });
 }
 
+export function useEditComment(projectId: string, taskId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: string }) =>
+      api<Comment>(`/comments/${id}`, { method: "PATCH", body: { body } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.comments(taskId) });
+      invalidateProject(qc, projectId);
+    },
+  });
+}
+
 // ---------- Test cases ----------
 export function useTests(projectId: string) {
   return useQuery({ queryKey: keys.tests(projectId), queryFn: () => api<TestCase[]>(`/projects/${projectId}/tests`) });

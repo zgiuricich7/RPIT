@@ -54,6 +54,38 @@ export function notifyAssignment(
   });
 }
 
+const memberCandidates = (db: DB, projectId: string) =>
+  db
+    .prepare(`SELECT u.id, u.name FROM project_members m JOIN users u ON u.id = m.user_id WHERE m.project_id = ?`)
+    .all(projectId) as { id: string; name: string }[];
+
+/**
+ * After a comment is edited, replace its stored mentions and notify only the
+ * people who weren't mentioned before. Edits don't send reply notifications.
+ */
+export function recordCommentEdit(
+  db: DB,
+  c: { commentId: string; taskId: string; projectId: string; authorId: string; body: string },
+) {
+  const before = new Set(
+    (db.prepare(`SELECT user_id FROM comment_mentions WHERE comment_id = ?`).all(c.commentId) as { user_id: string }[]).map(
+      (r) => r.user_id,
+    ),
+  );
+  const mentioned = mentionedUserIds(c.body, memberCandidates(db, c.projectId));
+  db.prepare(`DELETE FROM comment_mentions WHERE comment_id = ?`).run(c.commentId);
+  const insertMention = db.prepare(`INSERT INTO comment_mentions (comment_id, user_id) VALUES (?, ?)`);
+  for (const userId of mentioned) insertMention.run(c.commentId, userId);
+  notify(db, {
+    actorId: c.authorId,
+    projectId: c.projectId,
+    taskId: c.taskId,
+    commentId: c.commentId,
+    kind: "mention",
+    recipients: mentioned.filter((id) => !before.has(id)),
+  });
+}
+
 /**
  * Store @-mentions for a new comment and notify:
  * - each mentioned member ("mention"), and
@@ -64,12 +96,7 @@ export function recordCommentActivity(
   db: DB,
   c: { commentId: string; taskId: string; projectId: string; authorId: string; body: string },
 ) {
-  const candidates = db
-    .prepare(
-      `SELECT u.id, u.name FROM project_members m JOIN users u ON u.id = m.user_id WHERE m.project_id = ?`,
-    )
-    .all(c.projectId) as { id: string; name: string }[];
-  const mentioned = mentionedUserIds(c.body, candidates);
+  const mentioned = mentionedUserIds(c.body, memberCandidates(db, c.projectId));
   const insertMention = db.prepare(`INSERT INTO comment_mentions (comment_id, user_id) VALUES (?, ?)`);
   for (const userId of mentioned) insertMention.run(c.commentId, userId);
 

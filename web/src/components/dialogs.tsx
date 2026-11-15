@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   PRIORITY_LABELS,
@@ -6,6 +6,8 @@ import {
   TEST_STATUS_LABELS,
   ancestors,
   descendantIds,
+  type Comment,
+  type Member,
   type Priority,
   type Project,
   type Task,
@@ -21,6 +23,7 @@ import {
   useDeleteComment,
   useDeleteTask,
   useDeleteTest,
+  useEditComment,
   useMe,
   usePostComment,
   useMembers,
@@ -35,7 +38,7 @@ import {
 } from "../api/hooks.ts";
 import { formatDateTime } from "../lib/format.ts";
 import { ActivityFeed } from "./activity.tsx";
-import { CommentBody, MentionTextarea } from "./mentions.tsx";
+import { CommentBody, MarkdownEditor } from "./markdown.tsx";
 import { Modal, Options } from "./ui.tsx";
 
 /**
@@ -160,10 +163,14 @@ function TaskDialog(props: {
             Title
             <input autoFocus value={form.title} onChange={(e) => set("title", e.target.value)} required maxLength={200} />
           </label>
-          <label className="field">
-            Description
-            <textarea rows={3} value={form.description} onChange={(e) => set("description", e.target.value)} />
-          </label>
+          <MarkdownEditor
+            label="Description"
+            rows={4}
+            value={form.description}
+            onValueChange={(v) => set("description", v)}
+            readOnly={!canEdit}
+            maxLength={20_000}
+          />
           <div className="two">
             <label className="field">
               Status
@@ -236,13 +243,12 @@ function TaskDialog(props: {
 }
 
 function Discussion({ projectId, taskId }: { projectId: string; taskId: string }) {
-  const me = useMe().data;
   const [sp] = useSearchParams();
   const comments = useComments(taskId);
   const members = useMembers(projectId).data ?? [];
   const post = usePostComment(projectId, taskId);
-  const del = useDeleteComment(projectId, taskId);
   const [body, setBody] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   // Deep link from the inbox: scroll to the comment once it has loaded.
   const focusId = sp.get("comment");
@@ -268,47 +274,31 @@ function Discussion({ projectId, taskId }: { projectId: string; taskId: string }
         <div className="muted">No comments yet. Post an update to start the conversation.</div>
       )}
       {list.map((c) => (
-        <div
-          className={`comment${c.id === focusId ? " flash" : ""}`}
+        <CommentItem
           key={c.id}
-          ref={c.id === focusId ? focusRef : undefined}
-        >
-          <div className="head">
-            <b>{c.authorName}</b>
-            <span>
-              {formatDateTime(c.createdAt)}
-              {c.authorId === me?.id && (
-                <>
-                  {" "}
-                  <button
-                    type="button"
-                    className="linkbtn"
-                    onClick={() => confirm("Delete this comment?") && del.mutate(c.id)}
-                  >
-                    Delete
-                  </button>
-                </>
-              )}
-            </span>
-          </div>
-          <CommentBody body={c.body} mentions={c.mentions} />
-        </div>
+          comment={c}
+          projectId={projectId}
+          members={members}
+          focused={c.id === focusId}
+          focusRef={c.id === focusId ? focusRef : undefined}
+          editing={editingId === c.id}
+          onEdit={(on) => setEditingId(on ? c.id : null)}
+        />
       ))}
       {/* Every member can comment, including viewers. */}
       <form onSubmit={submit} className="discussion">
-        <label className="field">
-          Comment
-          <MentionTextarea
-            rows={2}
-            value={body}
-            members={members}
-            placeholder="Share progress, blockers or questions. Type @ to mention someone."
-            onValueChange={setBody}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submit(e);
-            }}
-          />
-        </label>
+        <MarkdownEditor
+          label="Comment"
+          rows={3}
+          value={body}
+          members={members}
+          maxLength={10_000}
+          placeholder="Share progress, blockers or questions"
+          onValueChange={setBody}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submit(e);
+          }}
+        />
         {post.error && <div className="form-error">{post.error.message}</div>}
         <div>
           <button className="btn primary" disabled={post.isPending || !body.trim()}>
@@ -316,6 +306,100 @@ function Discussion({ projectId, taskId }: { projectId: string; taskId: string }
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function CommentItem(props: {
+  comment: Comment;
+  projectId: string;
+  members: Member[];
+  focused: boolean;
+  focusRef?: RefObject<HTMLDivElement | null>;
+  editing: boolean;
+  onEdit: (on: boolean) => void;
+}) {
+  const { comment: c, editing, onEdit } = props;
+  const me = useMe().data;
+  const del = useDeleteComment(props.projectId, c.taskId);
+  const save = useEditComment(props.projectId, c.taskId);
+  const [draft, setDraft] = useState(c.body);
+  const mine = c.authorId === me?.id;
+
+  function startEditing() {
+    setDraft(c.body);
+    save.reset();
+    onEdit(true);
+  }
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!draft.trim()) return;
+    if (draft !== c.body) await save.mutateAsync({ id: c.id, body: draft });
+    onEdit(false);
+  }
+
+  return (
+    <div className={`comment${props.focused ? " flash" : ""}`} ref={props.focusRef}>
+      <div className="head">
+        <b>{c.authorName}</b>
+        <span>
+          {formatDateTime(c.createdAt)}
+          {c.editedAt && (
+            <span className="edited" title={`Edited ${formatDateTime(c.editedAt)}`}>
+              {" "}
+              · edited
+            </span>
+          )}
+          {mine && !editing && (
+            <>
+              {" "}
+              <button type="button" className="linkbtn" onClick={startEditing}>
+                Edit
+              </button>{" "}
+              <button
+                type="button"
+                className="linkbtn"
+                onClick={() => confirm("Delete this comment?") && del.mutate(c.id)}
+              >
+                Delete
+              </button>
+            </>
+          )}
+        </span>
+      </div>
+      {editing ? (
+        <form className="discussion" onSubmit={submit}>
+          <MarkdownEditor
+            label="Edit comment"
+            hideLabel
+            autoFocus
+            rows={3}
+            value={draft}
+            members={props.members}
+            maxLength={10_000}
+            onValueChange={setDraft}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submit(e);
+              // Escape cancels the edit instead of closing the whole dialog.
+              if (e.key === "Escape") {
+                e.preventDefault();
+                onEdit(false);
+              }
+            }}
+          />
+          {save.error && <div className="form-error">{save.error.message}</div>}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn primary sm" disabled={save.isPending || !draft.trim()}>
+              {save.isPending ? "Saving…" : "Save comment"}
+            </button>
+            <button type="button" className="btn sm" onClick={() => onEdit(false)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : (
+        <CommentBody body={c.body} mentions={c.mentions} />
+      )}
     </div>
   );
 }
@@ -425,18 +509,31 @@ function TestDialog(props: { projectId: string; test: TestCase | null; tasks: Ta
               </select>
             </label>
           </div>
-          <label className="field">
-            Steps
-            <textarea rows={4} value={form.steps} onChange={(e) => set("steps", e.target.value)} />
-          </label>
-          <label className="field">
-            Expected result
-            <input value={form.expected} onChange={(e) => set("expected", e.target.value)} />
-          </label>
-          <label className="field">
-            Notes and documentation
-            <textarea rows={3} value={form.notes} onChange={(e) => set("notes", e.target.value)} />
-          </label>
+          <MarkdownEditor
+            label="Steps"
+            rows={4}
+            value={form.steps}
+            onValueChange={(v) => set("steps", v)}
+            readOnly={!canEdit}
+            maxLength={20_000}
+            placeholder={"1. Open the page\n2. Click the button"}
+          />
+          <MarkdownEditor
+            label="Expected result"
+            rows={2}
+            value={form.expected}
+            onValueChange={(v) => set("expected", v)}
+            readOnly={!canEdit}
+            maxLength={20_000}
+          />
+          <MarkdownEditor
+            label="Notes and documentation"
+            rows={3}
+            value={form.notes}
+            onValueChange={(v) => set("notes", v)}
+            readOnly={!canEdit}
+            maxLength={20_000}
+          />
         </fieldset>
         {error && <div className="form-error">{error}</div>}
         <div style={{ display: "flex", gap: 8 }}>
@@ -507,10 +604,13 @@ export function ProjectDialog({ project, onClose }: { project: Project | null; o
           Name
           <input autoFocus value={name} onChange={(e) => setName(e.target.value)} required />
         </label>
-        <label className="field">
-          Description
-          <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
-        </label>
+        <MarkdownEditor
+          label="Description"
+          rows={4}
+          value={description}
+          onValueChange={setDescription}
+          maxLength={20_000}
+        />
         {error && <div className="form-error">{error}</div>}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button type="button" className="btn" onClick={onClose}>

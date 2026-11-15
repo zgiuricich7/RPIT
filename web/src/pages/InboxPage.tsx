@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { Notification } from "@rpit/shared";
+import { markdownToPlainText, type Notification } from "@rpit/shared";
 import { useMarkAllNotificationsRead, useMarkNotification, useNotifications } from "../api/hooks.ts";
 import { TopBar } from "../components/TopBar.tsx";
 import { formatDateTime } from "../lib/format.ts";
@@ -101,7 +101,7 @@ function InboxItem({ n }: { n: Notification }) {
           </button>
           {!n.read && <span className="visually-hidden"> (unread)</span>}
         </div>
-        {n.excerpt && <div className="excerpt">{n.excerpt}</div>}
+        {n.excerpt && <div className="excerpt">{markdownToPlainText(n.excerpt)}</div>}
         <div className="muted meta">
           {n.projectName} · {formatDateTime(n.createdAt)}
         </div>

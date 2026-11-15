@@ -5,6 +5,7 @@ import {
   PROJECT_ROLE_LABELS,
   TASK_STATUS_LABELS,
   TEST_STATUS_LABELS,
+  markdownToPlainText,
   type Activity,
   type ActivityPage,
   type FieldChange,
@@ -61,9 +62,10 @@ function formatValue(a: Activity, field: string, v: FieldChange["from"], l: Look
 }
 
 function Changes({ a, lookup }: { a: Activity; lookup: Lookup }) {
-  if (a.entity === "comment") {
+  // New and deleted comments show their text; edits fall through to the before/after view.
+  if (a.entity === "comment" && a.action !== "updated") {
     const text = a.diff.body?.to ?? a.diff.body?.from;
-    return text ? <p className="quote">{String(text)}</p> : null;
+    return text ? <p className="quote">{markdownToPlainText(String(text))}</p> : null;
   }
   const entries = Object.entries(a.diff).filter(([f]) => f in FIELD_LABELS);
   if (!entries.length) return null;
@@ -146,8 +148,8 @@ function Sentence({ a, scope, lookup }: { a: Activity; scope: ActivityScope; loo
       );
     }
     case "comment":
-      if (scope === "task") return <>{a.action === "created" ? "commented" : "deleted a comment"}</>;
-      return a.action === "created" ? <>commented on {taskName}</> : <>deleted a comment on {taskName}</>;
+      if (scope === "task") return <>{{ created: "commented", updated: "edited a comment", deleted: "deleted a comment" }[a.action]}</>;
+      return <>{{ created: "commented on", updated: "edited a comment on", deleted: "deleted a comment on" }[a.action]} {taskName}</>;
     case "test_case":
       return scope === "test" ? <>{verb} this test case</> : <>{verb} test case {testName}</>;
   }

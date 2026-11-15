@@ -1,32 +1,13 @@
-import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type TextareaHTMLAttributes } from "react";
-import { activeMentionQuery, findMentions, type CommentMention, type Member } from "@rpit/shared";
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type RefObject,
+  type TextareaHTMLAttributes,
+} from "react";
+import { activeMentionQuery, type Member } from "@rpit/shared";
 import { useMe } from "../api/hooks.ts";
-
-/**
- * Renders a comment body with its @-mentions highlighted. Uses the mentions
- * the server stored, so highlights stay put even if someone later leaves.
- */
-export function CommentBody({ body, mentions }: { body: string; mentions: CommentMention[] }) {
-  const me = useMe().data;
-  const matches = findMentions(
-    body,
-    mentions.map((m) => ({ id: m.userId, name: m.name })),
-  );
-  const parts: ReactNode[] = [];
-  let at = 0;
-  for (const m of matches) {
-    if (m.start > at) parts.push(body.slice(at, m.start));
-    const name = mentions.find((x) => x.userId === m.userId)?.name;
-    parts.push(
-      <span key={m.start} className={`mention${m.userId === me?.id ? " me" : ""}`} title={name}>
-        {body.slice(m.start, m.end)}
-      </span>,
-    );
-    at = m.end;
-  }
-  if (at < body.length) parts.push(body.slice(at));
-  return <p>{parts}</p>;
-}
 
 const MAX_SUGGESTIONS = 6;
 
@@ -40,11 +21,14 @@ export function MentionTextarea(
     value: string;
     onValueChange: (value: string) => void;
     members: Member[];
+    /** Lets a parent (the Markdown toolbar) act on the same textarea. */
+    inputRef?: RefObject<HTMLTextAreaElement | null>;
   } & Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "value" | "onChange">,
 ) {
-  const { value, onValueChange, members, onKeyDown, ...rest } = props;
+  const { value, onValueChange, members, onKeyDown, inputRef, ...rest } = props;
   const me = useMe().data;
-  const ref = useRef<HTMLTextAreaElement>(null);
+  const ownRef = useRef<HTMLTextAreaElement>(null);
+  const ref = inputRef ?? ownRef;
   const [caret, setCaret] = useState(0);
   const [highlight, setHighlight] = useState(0);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);

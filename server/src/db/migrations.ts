@@ -144,4 +144,8 @@ export const migrations: string[] = [
   BEFORE DELETE ON activity
   BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
   `,
+
+  /* 5: editable comments */ `
+  ALTER TABLE comments ADD COLUMN edited_at TEXT;
+  `,
 ];
