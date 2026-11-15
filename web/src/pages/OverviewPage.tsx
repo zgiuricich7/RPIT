@@ -9,7 +9,7 @@ import {
   leafProgress,
   type Project,
   type TaskStatus,
-} from "@tasktree/shared";
+} from "@rpit/shared";
 import {
   useDeleteProject,
   useProjectSummary,

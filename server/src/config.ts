@@ -8,7 +8,7 @@ export const REPO_ROOT = path.resolve(SERVER_ROOT, "..");
 
 export const config = {
   port: Number(process.env.PORT ?? 3001),
-  databasePath: process.env.DATABASE_PATH ?? path.join(SERVER_ROOT, "data", "tasktree.db"),
+  databasePath: process.env.DATABASE_PATH ?? path.join(SERVER_ROOT, "data", "rpit.db"),
   isProduction: process.env.NODE_ENV === "production",
   sessionDays: Number(process.env.SESSION_DAYS ?? 30),
   webDist: path.join(REPO_ROOT, "web", "dist"),

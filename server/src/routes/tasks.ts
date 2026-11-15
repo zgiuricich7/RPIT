@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { CommentInput, TaskInput, TaskPatch } from "@tasktree/shared";
+import { CommentInput, TaskInput, TaskPatch } from "@rpit/shared";
 import type { DB } from "../db/index.ts";
 import { newId, now } from "../db/index.ts";
 import { COMMENT_SELECT, getMemberRole, getTask, listTasks, toComment, wouldCreateCycle } from "../db/repo.ts";

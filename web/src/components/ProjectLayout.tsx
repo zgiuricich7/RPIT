@@ -18,8 +18,8 @@ export function ProjectLayout() {
   return (
     <>
       <header className="topbar">
-        <Link to="/" className="brand">
-          Tasktree
+        <Link to="/" className="brand" title="Recursive Project and Integration Tracker">
+          RPIT
         </Link>
         <select
           aria-label="Project"

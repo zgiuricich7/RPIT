@@ -7,7 +7,7 @@ import {
   type TaskStatus,
   type TestStatus,
   type User,
-} from "@tasktree/shared";
+} from "@rpit/shared";
 import { pct } from "../lib/format.ts";
 
 export function Modal(props: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {

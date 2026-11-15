@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { ProjectInput, ProjectPatch } from "@tasktree/shared";
+import { ProjectInput, ProjectPatch } from "@rpit/shared";
 import type { DB } from "../db/index.ts";
 import { newId, now, transaction } from "../db/index.ts";
 import { getProjectForUser, PROJECT_SELECT, projectSummary, recentComments, toProject } from "../db/repo.ts";

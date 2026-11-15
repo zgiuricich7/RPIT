@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { hasRole, type ProjectRole } from "@tasktree/shared";
+import { hasRole, type ProjectRole } from "@rpit/shared";
 import type {
   Comment,
   LoginInput,
@@ -18,7 +18,7 @@ import type {
   TestCaseInput,
   TestCasePatch,
   User,
-} from "@tasktree/shared";
+} from "@rpit/shared";
 import { api, ApiRequestError } from "./client.ts";
 
 /**

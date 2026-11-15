@@ -11,5 +11,5 @@ export default defineConfig({
   // node:sqlite only exists with the node: prefix, so keep it.
   removeNodeProtocol: false,
   // Bundle the workspace package (it ships TypeScript source); keep real deps external.
-  noExternal: ["@tasktree/shared"],
+  noExternal: ["@rpit/shared"],
 });

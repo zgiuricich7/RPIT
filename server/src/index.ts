@@ -6,7 +6,7 @@ const db = openDatabase(config.databasePath);
 const app = createApp(db, { staticDir: config.isProduction ? config.webDist : undefined });
 
 const server = app.listen(config.port, () => {
-  console.log(`Tasktree API listening on http://localhost:${config.port}`);
+  console.log(`RPIT API listening on http://localhost:${config.port}`);
   console.log(`Database: ${config.databasePath}`);
 });
 

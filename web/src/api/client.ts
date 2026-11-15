@@ -1,4 +1,4 @@
-import type { ApiError } from "@tasktree/shared";
+import type { ApiError } from "@rpit/shared";
 
 export class ApiRequestError extends Error {
   constructor(

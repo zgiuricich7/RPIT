@@ -13,7 +13,7 @@ import {
   type TaskNode,
   type TaskStatus,
   type User,
-} from "@tasktree/shared";
+} from "@rpit/shared";
 import { useTasks, useUpdateTask, useUsers } from "../api/hooks.ts";
 import { useDialogs } from "../components/dialogs.tsx";
 import { AssigneeName, Meter, TaskStatusPill, priorityLabel } from "../components/ui.tsx";

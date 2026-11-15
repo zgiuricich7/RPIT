@@ -1,4 +1,4 @@
-# Tasktree
+# RPIT — Recursive Project and Integration Tracker
 
 Project management web app: projects contain infinitely nested tasks (list tree + Kanban board),
 threaded comments on tasks, and test cases that can be linked to tasks, assigned and tracked.
@@ -11,7 +11,7 @@ Run from the repo root.
 | Command | What it does |
 | --- | --- |
 | `npm install` | Install all workspaces |
-| `npm run seed` | Create demo users + a sample project (`demo@tasktree.dev` / `tasktree-demo`) |
+| `npm run seed` | Create demo users + a sample project (`demo@rpit.dev` / `rpit-demo`) |
 | `npm run dev` | API on :3001 (tsx watch) + Vite on :5173 with `/api` proxied |
 | `npm test` | Vitest: shared tree utils + API integration tests (in-memory SQLite) |
 | `npm run typecheck` | `tsc` across all three workspaces |
@@ -23,7 +23,7 @@ Always run `npm run typecheck && npm test` before considering a change done.
 ## Layout
 
 ```
-shared/   @tasktree/shared — zod schemas, enums, labels, response types, tree utils.
+shared/   @rpit/shared — zod schemas, enums, labels, response types, tree utils.
           Imported as TypeScript source by both server and web (no build step).
 server/   Express 5 API on Node's built-in SQLite (node:sqlite, no native deps)
   src/app.ts          createApp(db) — mounts all routes; used by index.ts and tests

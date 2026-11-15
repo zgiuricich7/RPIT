@@ -19,7 +19,8 @@ export function AuthPage({ mode }: { mode: "login" | "register" }) {
   return (
     <div className="auth">
       <form onSubmit={submit}>
-        <h1>{mode === "login" ? "Sign in to Tasktree" : "Create your account"}</h1>
+        <h1>{mode === "login" ? "Sign in to RPIT" : "Create your account"}</h1>
+        <p className="muted" style={{ margin: "-8px 0 0" }}>Recursive Project and Integration Tracker</p>
         {mode === "register" && (
           <label className="field">
             Name

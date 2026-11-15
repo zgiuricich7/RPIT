@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { TestCaseInput, TestCasePatch } from "@tasktree/shared";
+import { TestCaseInput, TestCasePatch } from "@rpit/shared";
 import type { DB } from "../db/index.ts";
 import { newId, now } from "../db/index.ts";
 import { getTask, toTestCase } from "../db/repo.ts";

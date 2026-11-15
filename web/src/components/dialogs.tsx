@@ -12,7 +12,7 @@ import {
   type TaskStatus,
   type TestCase,
   type TestStatus,
-} from "@tasktree/shared";
+} from "@rpit/shared";
 import {
   useComments,
   useCreateProject,

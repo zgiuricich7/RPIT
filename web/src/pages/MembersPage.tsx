@@ -6,7 +6,7 @@ import {
   type Member,
   type Project,
   type ProjectRole,
-} from "@tasktree/shared";
+} from "@rpit/shared";
 import { ApiRequestError } from "../api/client.ts";
 import { useAddMember, useMe, useMembers, useRemoveMember, useUpdateMember } from "../api/hooks.ts";
 import { Options } from "../components/ui.tsx";

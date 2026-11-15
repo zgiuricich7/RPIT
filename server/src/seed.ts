@@ -3,7 +3,7 @@
  * nothing if the demo user already exists.
  *
  *   npm run seed
- *   Sign in with demo@tasktree.dev / tasktree-demo
+ *   Sign in with demo@rpit.dev / rpit-demo
  */
 import { config } from "./config.ts";
 import { newId, openDatabase, transaction } from "./db/index.ts";
@@ -11,16 +11,16 @@ import { hashPassword } from "./auth.ts";
 
 const db = openDatabase(config.databasePath);
 
-if (db.prepare(`SELECT 1 FROM users WHERE email = ?`).get("demo@tasktree.dev")) {
+if (db.prepare(`SELECT 1 FROM users WHERE email = ?`).get("demo@rpit.dev")) {
   console.log("Demo data already present. Delete the database file to reseed.");
   process.exit(0);
 }
 
-const pw = await hashPassword("tasktree-demo");
+const pw = await hashPassword("rpit-demo");
 const maya = newId();
 const priya = newId();
-db.prepare(`INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)`).run(maya, "demo@tasktree.dev", "Maya Chen", pw);
-db.prepare(`INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)`).run(priya, "priya@tasktree.dev", "Priya Patel", pw);
+db.prepare(`INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)`).run(maya, "demo@rpit.dev", "Maya Chen", pw);
+db.prepare(`INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)`).run(priya, "priya@rpit.dev", "Priya Patel", pw);
 
 const project = newId();
 db.prepare(`INSERT INTO projects (id, name, description) VALUES (?, ?, ?)`).run(
@@ -76,5 +76,5 @@ transaction(db, () => {
     "", "301 to new path", "");
 });
 
-console.log("Seeded demo data. Sign in with demo@tasktree.dev / tasktree-demo");
+console.log("Seeded demo data. Sign in with demo@rpit.dev / rpit-demo");
 db.close();

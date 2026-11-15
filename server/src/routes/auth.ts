@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { LoginInput, RegisterInput } from "@tasktree/shared";
+import { LoginInput, RegisterInput } from "@rpit/shared";
 import type { DB } from "../db/index.ts";
 import { newId } from "../db/index.ts";
 import { toUser } from "../db/repo.ts";

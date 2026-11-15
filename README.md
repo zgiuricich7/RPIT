@@ -1,4 +1,4 @@
-# Tasktree
+# RPIT — Recursive Project and Integration Tracker
 
 Project management with infinitely nested tasks, list and Kanban views, task discussions,
 and test case tracking — with a per-project overview dashboard.
@@ -26,7 +26,7 @@ npm run seed      # optional demo data
 npm run dev
 ```
 
-Open http://localhost:5173 and sign in with `demo@tasktree.dev` / `tasktree-demo`,
+Open http://localhost:5173 and sign in with `demo@rpit.dev` / `rpit-demo`,
 or create an account.
 
 ## Production
@@ -41,7 +41,7 @@ Configuration (environment variables, or a `.env` file in the repo root — see 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `3001` | HTTP port |
-| `DATABASE_PATH` | `server/data/tasktree.db` | SQLite file location |
+| `DATABASE_PATH` | `server/data/rpit.db` | SQLite file location |
 | `SESSION_DAYS` | `30` | Session cookie lifetime |
 | `NODE_ENV` | — | `production` serves `web/dist` and marks cookies `Secure` (use HTTPS) |
 

@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
-import type { ApiError } from "@tasktree/shared";
+import type { ApiError } from "@rpit/shared";
 import { z } from "zod";
 
 export class HttpError extends Error {

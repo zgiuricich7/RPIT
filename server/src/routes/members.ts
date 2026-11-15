@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { MemberInput, MemberPatch, type ProjectRole } from "@tasktree/shared";
+import { MemberInput, MemberPatch, type ProjectRole } from "@rpit/shared";
 import type { DB } from "../db/index.ts";
 import { transaction } from "../db/index.ts";
 import { getMember, MEMBER_SELECT, toMember } from "../db/repo.ts";

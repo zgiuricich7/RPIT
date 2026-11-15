@@ -1,5 +1,5 @@
 {
-  "name": "tasktree",
+  "name": "rpit",
   "version": "0.1.0",
   "private": true,
   "description": "Project management with infinitely nested tasks, Kanban and list views, comments, and test case tracking.",

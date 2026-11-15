@@ -8,8 +8,8 @@ import type {
   Task,
   TestCase,
   User,
-} from "@tasktree/shared";
-import { TASK_STATUSES, TEST_STATUSES, leafProgress } from "@tasktree/shared";
+} from "@rpit/shared";
+import { TASK_STATUSES, TEST_STATUSES, leafProgress } from "@rpit/shared";
 import type { DB } from "./index.ts";
 
 /**

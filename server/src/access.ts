@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
-import { hasRole, PROJECT_ROLE_LABELS, type ProjectRole } from "@tasktree/shared";
+import { hasRole, PROJECT_ROLE_LABELS, type ProjectRole } from "@rpit/shared";
 import type { DB } from "./db/index.ts";
 import { getMemberRole } from "./db/repo.ts";
 import { currentUser } from "./auth.ts";

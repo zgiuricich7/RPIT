@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useOutletContext } from "react-router-dom";
-import { TEST_STATUSES, TEST_STATUS_LABELS, hasRole, type Project, type TestStatus } from "@tasktree/shared";
+import { TEST_STATUSES, TEST_STATUS_LABELS, hasRole, type Project, type TestStatus } from "@rpit/shared";
 import { useTasks, useTests, useUpdateTest, useUsers } from "../api/hooks.ts";
 import { useDialogs } from "../components/dialogs.tsx";
 import { AssigneeName, Options, Stack, priorityLabel } from "../components/ui.tsx";

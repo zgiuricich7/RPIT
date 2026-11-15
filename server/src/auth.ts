@@ -1,13 +1,13 @@
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { NextFunction, Request, Response } from "express";
-import type { User } from "@tasktree/shared";
+import type { User } from "@rpit/shared";
 import type { DB } from "./db/index.ts";
 import { toUser } from "./db/repo.ts";
 import { HttpError } from "./http.ts";
 import { config } from "./config.ts";
 
-export const SESSION_COOKIE = "tt_session";
+export const SESSION_COOKIE = "rpit_session";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
