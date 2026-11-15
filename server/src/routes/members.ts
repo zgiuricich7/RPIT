@@ -84,6 +84,8 @@ export function memberRoutes(db: DB) {
         projectId,
         userId,
       );
+      // Their inbox shouldn't keep links into a project they can no longer open.
+      db.prepare(`DELETE FROM notifications WHERE project_id = ? AND user_id = ?`).run(projectId, userId);
       db.prepare(`DELETE FROM project_members WHERE project_id = ? AND user_id = ?`).run(projectId, userId);
     });
     res.status(204).end();

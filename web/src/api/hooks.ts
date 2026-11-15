@@ -5,6 +5,8 @@ import type {
   LoginInput,
   Member,
   MemberInput,
+  Notification,
+  NotificationList,
   Project,
   ProjectInput,
   ProjectPatch,
@@ -36,6 +38,8 @@ export const keys = {
   recent: (projectId: string) => ["project", projectId, "recent-comments"] as const,
   members: (projectId: string) => ["project", projectId, "members"] as const,
   comments: (taskId: string) => ["task", taskId, "comments"] as const,
+  /** The signed-in user's inbox; not project-scoped. */
+  notifications: ["notifications"] as const,
 };
 
 // ---------- Auth ----------
@@ -279,5 +283,38 @@ export function useDeleteTest(projectId: string) {
   return useMutation({
     mutationFn: (id: string) => api<void>(`/tests/${id}`, { method: "DELETE" }),
     onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+// ---------- Notifications (in-app inbox) ----------
+/**
+ * The inbox, newest first. There are no real-time updates, so this polls
+ * while the app is open (and refetches on focus) to keep the badge current.
+ */
+export function useNotifications(onlyUnread = false) {
+  return useQuery({
+    queryKey: [...keys.notifications, { onlyUnread }],
+    queryFn: () => api<NotificationList>(`/notifications${onlyUnread ? "?unread=true" : ""}`),
+    refetchInterval: 30_000,
+  });
+}
+
+/** Unread count for the top bar badge. */
+export const useUnreadCount = () => useNotifications(true).data?.unreadCount ?? 0;
+
+export function useMarkNotification() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, read }: { id: string; read: boolean }) =>
+      api<Notification>(`/notifications/${id}`, { method: "PATCH", body: { read } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.notifications }),
+  });
+}
+
+export function useMarkAllNotificationsRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<void>("/notifications/read-all", { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.notifications }),
   });
 }

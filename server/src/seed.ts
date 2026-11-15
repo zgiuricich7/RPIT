@@ -8,6 +8,7 @@
 import { config } from "./config.ts";
 import { newId, openDatabase, transaction } from "./db/index.ts";
 import { hashPassword } from "./auth.ts";
+import { recordCommentActivity } from "./notify.ts";
 
 const db = openDatabase(config.databasePath);
 
@@ -63,6 +64,13 @@ transaction(db, () => {
   db.prepare(`INSERT INTO comments (id, task_id, author_id, body) VALUES (?, ?, ?, ?)`).run(
     newId(), id("table"), maya, "Thanks, I'll prioritise that fix this week.",
   );
+  // Goes through the same path as the API so Maya has a mention in her inbox.
+  const mentionId = newId();
+  const mentionBody = "@Maya Chen the button states are ready for review whenever you have a minute.";
+  db.prepare(`INSERT INTO comments (id, task_id, author_id, body) VALUES (?, ?, ?, ?)`).run(
+    mentionId, id("buttons"), priya, mentionBody,
+  );
+  recordCommentActivity(db, { commentId: mentionId, taskId: id("buttons"), projectId: project, authorId: priya, body: mentionBody });
 
   const insertTest = db.prepare(
     `INSERT INTO test_cases (id, project_id, task_id, title, status, priority, assignee_id, steps, expected, notes)

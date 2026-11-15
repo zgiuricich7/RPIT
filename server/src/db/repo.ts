@@ -1,6 +1,8 @@
 import type {
   Comment,
+  CommentMention,
   Member,
+  Notification,
   Project,
   ProjectRole,
   ProjectSummary,
@@ -65,6 +67,24 @@ export const toComment = (r: Row): Comment => ({
   authorId: r.author_id as string,
   authorName: r.author_name as string,
   body: r.body as string,
+  mentions: r.mentions_json ? (JSON.parse(r.mentions_json as string) as CommentMention[]) : [],
+  createdAt: r.created_at as string,
+});
+
+export const toNotification = (r: Row): Notification => ({
+  id: r.id as string,
+  kind: r.kind as Notification["kind"],
+  projectId: r.project_id as string,
+  projectName: r.project_name as string,
+  actorId: (r.actor_id as string | null) ?? null,
+  actorName: (r.actor_name as string | null) ?? null,
+  taskId: (r.task_id as string | null) ?? null,
+  taskTitle: (r.task_title as string | null) ?? null,
+  testCaseId: (r.test_case_id as string | null) ?? null,
+  testTitle: (r.test_title as string | null) ?? null,
+  commentId: (r.comment_id as string | null) ?? null,
+  excerpt: (r.excerpt as string | null) ?? null,
+  read: r.read_at != null,
   createdAt: r.created_at as string,
 });
 
@@ -87,9 +107,31 @@ export const TASK_SELECT = `
   SELECT t.*, (SELECT COUNT(*) FROM comments c WHERE c.task_id = t.id) AS comment_count
   FROM tasks t`;
 
+/** Comment columns plus author name and mentions (as JSON); alias comments as c and the author as u. */
+const COMMENT_COLUMNS = `c.*, u.name AS author_name,
+  (SELECT json_group_array(json_object('userId', mu.id, 'name', mu.name))
+   FROM comment_mentions cm JOIN users mu ON mu.id = cm.user_id
+   WHERE cm.comment_id = c.id) AS mentions_json`;
+
 export const COMMENT_SELECT = `
-  SELECT c.*, u.name AS author_name
+  SELECT ${COMMENT_COLUMNS}
   FROM comments c JOIN users u ON u.id = c.author_id`;
+
+/**
+ * The signed-in user's notifications, only for projects they're still a member of.
+ * Bind the user id first.
+ */
+export const NOTIFICATION_SELECT = `
+  SELECT n.*, p.name AS project_name, a.name AS actor_name, t.title AS task_title,
+         tc.title AS test_title, substr(c.body, 1, 200) AS excerpt
+  FROM notifications n
+  JOIN projects p ON p.id = n.project_id
+  JOIN project_members m ON m.project_id = n.project_id AND m.user_id = n.user_id
+  LEFT JOIN users a ON a.id = n.actor_id
+  LEFT JOIN tasks t ON t.id = n.task_id
+  LEFT JOIN test_cases tc ON tc.id = n.test_case_id
+  LEFT JOIN comments c ON c.id = n.comment_id
+  WHERE n.user_id = ?`;
 
 /** Projects joined with the viewer's membership; bind the user id first. */
 export const PROJECT_SELECT = `
@@ -181,7 +223,7 @@ export function recentComments(db: DB, projectId: string, limit = 5): RecentComm
   return (
     db
       .prepare(
-        `SELECT c.*, u.name AS author_name, t.title AS task_title
+        `SELECT ${COMMENT_COLUMNS}, t.title AS task_title
          FROM comments c
          JOIN users u ON u.id = c.author_id
          JOIN tasks t ON t.id = c.task_id

@@ -19,6 +19,7 @@ import {
   useTests,
 } from "../api/hooks.ts";
 import { ProjectDialog, useDialogs } from "../components/dialogs.tsx";
+import { CommentBody } from "../components/mentions.tsx";
 import { Meter, Stack, TaskStatusPill, TestStatusPill } from "../components/ui.tsx";
 import { formatDateTime } from "../lib/format.ts";
 import { TEST_COLORS } from "./TestsPage.tsx";
@@ -170,7 +171,7 @@ export function OverviewPage() {
                     {c.taskTitle}
                   </button>
                 </div>
-                <p>{c.body}</p>
+                <CommentBody body={c.body} mentions={c.mentions} />
               </div>
             ))}
           </div>

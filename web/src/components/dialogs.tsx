@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   PRIORITY_LABELS,
@@ -32,18 +32,20 @@ import {
   useUpdateTest,
 } from "../api/hooks.ts";
 import { formatDateTime } from "../lib/format.ts";
+import { CommentBody, MentionTextarea } from "./mentions.tsx";
 import { Modal, Options } from "./ui.tsx";
 
 /**
  * Task and test dialogs are driven by the URL (?task=<id>, ?task=new&parent=<id>,
  * ?test=<id>, ?test=new) so they can be deep-linked and survive a refresh.
+ * ?task=<id>&comment=<id> also scrolls to and highlights that comment.
  */
 export function useDialogs() {
   const [, setSp] = useSearchParams();
   const update = (next: Record<string, string>) =>
     setSp((prev) => {
       const sp = new URLSearchParams(prev);
-      for (const k of ["task", "parent", "test"]) sp.delete(k);
+      for (const k of ["task", "parent", "test", "comment"]) sp.delete(k);
       for (const [k, v] of Object.entries(next)) sp.set(k, v);
       return sp;
     });
@@ -227,10 +229,20 @@ function TaskDialog(props: {
 
 function Discussion({ projectId, taskId }: { projectId: string; taskId: string }) {
   const me = useMe().data;
+  const [sp] = useSearchParams();
   const comments = useComments(taskId);
+  const members = useMembers(projectId).data ?? [];
   const post = usePostComment(projectId, taskId);
   const del = useDeleteComment(projectId, taskId);
   const [body, setBody] = useState("");
+
+  // Deep link from the inbox: scroll to the comment once it has loaded.
+  const focusId = sp.get("comment");
+  const focusRef = useRef<HTMLDivElement>(null);
+  const loaded = Boolean(comments.data);
+  useEffect(() => {
+    if (loaded) focusRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [loaded, focusId]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -248,7 +260,11 @@ function Discussion({ projectId, taskId }: { projectId: string; taskId: string }
         <div className="muted">No comments yet. Post an update to start the conversation.</div>
       )}
       {list.map((c) => (
-        <div className="comment" key={c.id}>
+        <div
+          className={`comment${c.id === focusId ? " flash" : ""}`}
+          key={c.id}
+          ref={c.id === focusId ? focusRef : undefined}
+        >
           <div className="head">
             <b>{c.authorName}</b>
             <span>
@@ -267,18 +283,19 @@ function Discussion({ projectId, taskId }: { projectId: string; taskId: string }
               )}
             </span>
           </div>
-          <p>{c.body}</p>
+          <CommentBody body={c.body} mentions={c.mentions} />
         </div>
       ))}
       {/* Every member can comment, including viewers. */}
       <form onSubmit={submit} className="discussion">
         <label className="field">
           Comment
-          <textarea
+          <MentionTextarea
             rows={2}
             value={body}
-            placeholder="Share progress, blockers or questions"
-            onChange={(e) => setBody(e.target.value)}
+            members={members}
+            placeholder="Share progress, blockers or questions. Type @ to mention someone."
+            onValueChange={setBody}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submit(e);
             }}

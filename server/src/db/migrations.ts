@@ -90,4 +90,29 @@ export const migrations: string[] = [
   INSERT INTO project_members (project_id, user_id, role)
   SELECT p.id, u.id, 'owner' FROM projects p CROSS JOIN users u;
   `,
+
+  /* 3: @-mentions in comments and in-app notifications */ `
+  CREATE TABLE comment_mentions (
+    comment_id TEXT NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (comment_id, user_id)
+  );
+  CREATE INDEX idx_mentions_user ON comment_mentions(user_id);
+
+  -- One row per recipient. Deleting the task, test case or comment it points at
+  -- deletes the notification, so the inbox never links to something that's gone.
+  CREATE TABLE notifications (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    actor_id     TEXT REFERENCES users(id) ON DELETE SET NULL,
+    project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    kind         TEXT NOT NULL CHECK (kind IN ('task_assigned','test_assigned','mention','reply')),
+    task_id      TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+    test_case_id TEXT REFERENCES test_cases(id) ON DELETE CASCADE,
+    comment_id   TEXT REFERENCES comments(id) ON DELETE CASCADE,
+    read_at      TEXT,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX idx_notifications_user ON notifications(user_id, created_at);
+  `,
 ];

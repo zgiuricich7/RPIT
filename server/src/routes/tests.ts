@@ -6,6 +6,8 @@ import { getTask, toTestCase } from "../db/repo.ts";
 import { HttpError, notFound, param, parseBody } from "../http.ts";
 import { byTestCase, requireProjectRole } from "../access.ts";
 import { checkAssignee } from "./tasks.ts";
+import { currentUser } from "../auth.ts";
+import { notifyAssignment } from "../notify.ts";
 
 export function testCaseRoutes(db: DB) {
   /** Mounted at /api/projects/:projectId/tests */
@@ -53,6 +55,7 @@ export function testCaseRoutes(db: DB) {
       input.expected,
       input.notes,
     );
+    notifyAssignment(db, { kind: "test_assigned", actorId: currentUser(req).id, projectId, id }, null, input.assigneeId);
     res.status(201).json(get(id));
   });
 
@@ -71,6 +74,12 @@ export function testCaseRoutes(db: DB) {
       `UPDATE test_cases SET task_id = ?, title = ?, status = ?, priority = ?, assignee_id = ?,
          steps = ?, expected = ?, notes = ?, updated_at = ? WHERE id = ?`,
     ).run(m.taskId, m.title, m.status, m.priority, m.assigneeId, m.steps, m.expected, m.notes, now(), id);
+    notifyAssignment(
+      db,
+      { kind: "test_assigned", actorId: currentUser(req).id, projectId: cur.projectId, id },
+      cur.assigneeId,
+      m.assigneeId,
+    );
     res.json(get(id));
   });
 

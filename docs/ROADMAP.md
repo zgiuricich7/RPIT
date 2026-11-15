@@ -7,8 +7,11 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
 
 1.1 ~~**Project membership and roles.**~~ Done. Follow-up: pending invites for emails without an
     account (send an invite link, add the membership on sign-up).
-1.2 **@-mentions in comments.** Parse `@Name`, store mentions, highlight in the UI.
-1.3 **Notifications.** In-app inbox for assignments, mentions and replies; optional email digest.
+1.2 ~~**@-mentions in comments.**~~ Done: `@Full Name` of a project member, with autocomplete.
+    Follow-up: mention by first name or a handle, and keep highlights when someone is renamed.
+1.3 ~~**Notifications.**~~ Done: in-app inbox for assignments, mentions and replies (polled every 30s).
+    Follow-up: email digest (needs an email sender; see 4.3), per-user notification preferences,
+    and pushing new notifications over 1.6's event stream instead of polling.
 1.4 **Activity log.** `activity(project_id, actor_id, entity, entity_id, action, diff, created_at)`
     written from routes; show per task and a project feed on the overview.
 1.5 **Edit comments**, with an "edited" marker. Optionally Markdown rendering.

@@ -8,6 +8,7 @@ import { loadUser, requireUser } from "./auth.ts";
 import { errorHandler, HttpError } from "./http.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { memberRoutes } from "./routes/members.ts";
+import { notificationRoutes } from "./routes/notifications.ts";
 import { projectRoutes } from "./routes/projects.ts";
 import { commentRoutes, taskRoutes } from "./routes/tasks.ts";
 import { testCaseRoutes } from "./routes/tests.ts";
@@ -46,6 +47,7 @@ export function createApp(db: DB, opts: AppOptions = {}) {
   api.use("/tasks", tasks.byId);
   api.use("/tests", tests.byId);
   api.use("/comments", commentRoutes(db));
+  api.use("/notifications", notificationRoutes(db));
   api.use((_req, _res) => {
     throw new HttpError(404, "API route not found");
   });

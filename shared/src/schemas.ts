@@ -109,6 +109,13 @@ export const CommentInput = z.object({
 });
 export type CommentInput = z.infer<typeof CommentInput>;
 
+// ---------- Notifications ----------
+export const NOTIFICATION_KINDS = ["task_assigned", "test_assigned", "mention", "reply"] as const;
+export const NotificationKind = z.enum(NOTIFICATION_KINDS);
+export type NotificationKind = z.infer<typeof NotificationKind>;
+export const NotificationPatch = z.object({ read: z.boolean() });
+export type NotificationPatch = z.infer<typeof NotificationPatch>;
+
 // ---------- Test cases ----------
 export const TestCaseInput = z.object({
   title,
@@ -165,12 +172,19 @@ export interface Task {
   updatedAt: string;
 }
 
+export interface CommentMention {
+  userId: string;
+  name: string;
+}
+
 export interface Comment {
   id: string;
   taskId: string;
   authorId: string;
   authorName: string;
   body: string;
+  /** Project members @-mentioned in the body when it was posted. */
+  mentions: CommentMention[];
   createdAt: string;
 }
 
@@ -191,6 +205,30 @@ export interface TestCase {
   notes: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface Notification {
+  id: string;
+  kind: NotificationKind;
+  projectId: string;
+  projectName: string;
+  /** Who caused it; null if their account was deleted. */
+  actorId: string | null;
+  actorName: string | null;
+  taskId: string | null;
+  taskTitle: string | null;
+  testCaseId: string | null;
+  testTitle: string | null;
+  commentId: string | null;
+  /** Start of the comment body, for mentions and replies. */
+  excerpt: string | null;
+  read: boolean;
+  createdAt: string;
+}
+
+export interface NotificationList {
+  items: Notification[];
+  unreadCount: number;
 }
 
 export interface ProjectSummary {

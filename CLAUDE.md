@@ -1,7 +1,8 @@
 # RPIT — Recursive Project and Integration Tracker
 
 Project management web app: projects contain infinitely nested tasks (list tree + Kanban board),
-threaded comments on tasks, and test cases that can be linked to tasks, assigned and tracked.
+threaded comments on tasks (with @-mentions), test cases that can be linked to tasks, assigned and tracked,
+and an in-app inbox of notifications.
 Each project has an overview dashboard summarising completion and test status.
 
 ## Commands
@@ -32,12 +33,15 @@ server/   Express 5 API on Node's built-in SQLite (node:sqlite, no native deps)
   src/routes/*.ts     one file per resource
   src/auth.ts         bcrypt passwords, opaque session id in an httpOnly cookie
   src/access.ts       requireProjectRole middleware + project resolvers
+  src/notify.ts       creates notifications (assignments, mentions, replies) and stores comment mentions
   test/api.test.ts    supertest against an in-memory DB
 web/      React 19 + Vite + TanStack Query + React Router 7
   src/api/client.ts   fetch wrapper (throws ApiRequestError with fieldErrors)
   src/api/hooks.ts    every query/mutation hook + query keys
   src/components/dialogs.tsx  URL-driven task/test dialogs (?task=<id>, ?test=<id>) + comments UI
-  src/pages/          Overview, Tasks (List + Board), Tests, Members, Auth
+  src/components/mentions.tsx  highlighted comment body + @-mention autocomplete textarea
+  src/components/TopBar.tsx    header with project switcher and inbox badge
+  src/pages/          Overview, Tasks (List + Board), Tests, Members, Inbox, Auth
   src/styles.css      design tokens (light/dark) and all styles; plain CSS, no framework
 docs/ROADMAP.md       prioritised backlog
 ```
@@ -52,6 +56,10 @@ docs/ROADMAP.md       prioritised backlog
 - `comments.task_id → tasks.id` (cascade), `comments.author_id → users.id`
 - `test_cases.task_id → tasks.id` (`ON DELETE SET NULL`) — deleting a task unlinks tests, never deletes them.
 - `assignee_id` columns reference `users` with `SET NULL`.
+- `comment_mentions(comment_id, user_id)` — who a comment @-mentioned, computed once when it's posted.
+- `notifications(user_id, actor_id, project_id, kind, task_id, test_case_id, comment_id, read_at)` — one row
+  per recipient; `kind` is `task_assigned` / `test_assigned` / `mention` / `reply` (CHECK + `NotificationKind`).
+  Cascades from the task, test case or comment it points at; removed when the recipient leaves the project.
 - Statuses and priorities are constrained by `CHECK` in SQL **and** by zod enums in `shared`. Change both together.
 
 ## Conventions
@@ -78,6 +86,13 @@ docs/ROADMAP.md       prioritised backlog
   members below the required role get 403. Viewers read and comment; editors also write tasks and tests;
   owners also edit/delete the project and manage members. Comment authors can delete their own comments. Assignees must be project members (`checkAssignee`).
 - On the web, `useProjectRole(projectId)` / `project.role` only hide controls; the server is the authority.
+- **Mentions** are `@` + a member's full name, parsed by `findMentions` in `shared/src/mentions.ts`. The server
+  uses it to store mentions; the web uses it with the stored `comment.mentions` to highlight, so both agree.
+- **Notifications are in-app only** (no email). Create them with `notify` / `notifyAssignment` /
+  `recordCommentActivity` from `server/src/notify.ts` after a write; they skip the actor and non-members.
+  "Reply" means a new comment on a task you've commented on or are assigned to (comments are flat).
+  `/api/notifications` is user-scoped (ownership check, not `requireProjectRole`); the web polls it every 30s
+  under the `["notifications"]` key.
 
 ## Adding a feature (checklist)
 
@@ -88,6 +103,7 @@ docs/ROADMAP.md       prioritised backlog
 
 - Invites only work for existing accounts (no pending invites or invite emails yet).
   `GET /api/users` still lists every user; it is only used to display assignee names.
-- No real-time updates; TanStack Query refetches on focus and after mutations.
+- No real-time updates; TanStack Query refetches on focus and after mutations (the inbox also polls).
+- Notifications are not emailed.
 - Board drag-and-drop uses native HTML5 DnD (no touch support, no reordering within a column).
 - SQLite single file; fine for a team on one server. Postgres is on the roadmap.

@@ -1,11 +1,12 @@
 import { Router } from "express";
 import { CommentInput, TaskInput, TaskPatch } from "@rpit/shared";
 import type { DB } from "../db/index.ts";
-import { newId, now } from "../db/index.ts";
+import { newId, now, transaction } from "../db/index.ts";
 import { COMMENT_SELECT, getMemberRole, getTask, listTasks, toComment, wouldCreateCycle } from "../db/repo.ts";
 import { HttpError, notFound, param, parseBody } from "../http.ts";
 import { currentUser } from "../auth.ts";
-import { byComment, byTask, requireProjectRole } from "../access.ts";
+import { byComment, byTask, currentProject, requireProjectRole } from "../access.ts";
+import { notifyAssignment, recordCommentActivity } from "../notify.ts";
 
 /** Assignees must be members of the project. */
 export function checkAssignee(db: DB, projectId: string, assigneeId: string | null | undefined) {
@@ -62,6 +63,7 @@ export function taskRoutes(db: DB) {
       input.assigneeId,
       nextPosition(projectId, input.parentId),
     );
+    notifyAssignment(db, { kind: "task_assigned", actorId: currentUser(req).id, projectId, id }, null, input.assigneeId);
     res.status(201).json(requireTask(id));
   });
 
@@ -97,6 +99,12 @@ export function taskRoutes(db: DB) {
       now(),
       id,
     );
+    notifyAssignment(
+      db,
+      { kind: "task_assigned", actorId: currentUser(req).id, projectId: cur.projectId, id },
+      cur.assigneeId,
+      merged.assigneeId,
+    );
     res.json(requireTask(id));
   });
 
@@ -115,13 +123,12 @@ export function taskRoutes(db: DB) {
   byId.post("/:taskId/comments", can("viewer", byTask), (req, res) => {
     const taskId = param(req, "taskId");
     const { body } = parseBody(CommentInput, req.body);
+    const authorId = currentUser(req).id;
     const id = newId();
-    db.prepare(`INSERT INTO comments (id, task_id, author_id, body) VALUES (?, ?, ?, ?)`).run(
-      id,
-      taskId,
-      currentUser(req).id,
-      body,
-    );
+    transaction(db, () => {
+      db.prepare(`INSERT INTO comments (id, task_id, author_id, body) VALUES (?, ?, ?, ?)`).run(id, taskId, authorId, body);
+      recordCommentActivity(db, { commentId: id, taskId, projectId: currentProject(req).id, authorId, body });
+    });
     const row = db.prepare(`${COMMENT_SELECT} WHERE c.id = ?`).get(id) as Record<string, unknown>;
     res.status(201).json(toComment(row));
   });

@@ -6,6 +6,7 @@ import { useMe } from "./api/hooks.ts";
 import { ProjectLayout } from "./components/ProjectLayout.tsx";
 import { AuthPage } from "./pages/AuthPage.tsx";
 import { HomePage } from "./pages/HomePage.tsx";
+import { InboxPage } from "./pages/InboxPage.tsx";
 import { MembersPage } from "./pages/MembersPage.tsx";
 import { OverviewPage } from "./pages/OverviewPage.tsx";
 import { TasksPage } from "./pages/TasksPage.tsx";
@@ -32,6 +33,7 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<HomePage />} />
+      <Route path="/inbox" element={<InboxPage />} />
       <Route path="/projects/:projectId" element={<ProjectLayout />}>
         <Route index element={<Navigate to="overview" replace />} />
         <Route path="overview" element={<OverviewPage />} />

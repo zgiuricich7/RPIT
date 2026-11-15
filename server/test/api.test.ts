@@ -316,3 +316,122 @@ describe("test cases and summary", () => {
     expect(db.prepare(`SELECT COUNT(*) AS n FROM test_cases`).get()).toEqual({ n: 0 });
   });
 });
+
+describe("mentions and notifications", () => {
+  /** Owner (Tester) plus two editors, Bea Lee and Cal. */
+  async function team() {
+    const { db, agent, projectId, userId } = ctx;
+    const bea = await signUp(db, "Bea Lee", "bea@x.com");
+    const cal = await signUp(db, "Cal", "cal@x.com");
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "bea@x.com" }).expect(201);
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "cal@x.com" }).expect(201);
+    const beaId = (await bea.get("/api/auth/me")).body.id as string;
+    const calId = (await cal.get("/api/auth/me")).body.id as string;
+    return { db, bea, cal, beaId, calId, owner: agent, ownerId: userId, projectId };
+  }
+  const inbox = async (a: Awaited<ReturnType<typeof signUp>>) => (await a.get("/api/notifications").expect(200)).body;
+
+  it("stores mentions of project members only and returns them with comments", async () => {
+    const { db, owner, projectId, beaId } = await team();
+    await signUp(db, "Outsider", "o@x.com");
+    const t = (await owner.post(`/api/projects/${projectId}/tasks`).send({ title: "A" })).body;
+    const c = (await owner
+      .post(`/api/tasks/${t.id}/comments`)
+      .send({ body: "@bea lee and @Outsider, thoughts? cc @Nobody" })
+      .expect(201)).body;
+    expect(c.mentions).toEqual([{ userId: beaId, name: "Bea Lee" }]);
+
+    const list = (await owner.get(`/api/tasks/${t.id}/comments`)).body;
+    expect(list[0].mentions).toEqual([{ userId: beaId, name: "Bea Lee" }]);
+    const recent = (await owner.get(`/api/projects/${projectId}/comments/recent`)).body;
+    expect(recent[0].mentions).toEqual([{ userId: beaId, name: "Bea Lee" }]);
+
+    await owner.post(`/api/tasks/${t.id}/comments`).send({ body: "No mentions" }).expect(201);
+    expect((await owner.get(`/api/tasks/${t.id}/comments`)).body[1].mentions).toEqual([]);
+  });
+
+  it("notifies new assignees of tasks and tests, but not self-assignment", async () => {
+    const { owner, bea, cal, projectId, beaId, ownerId } = await team();
+    const t = (await owner.post(`/api/projects/${projectId}/tasks`).send({ title: "Build", assigneeId: beaId })).body;
+    await owner.patch(`/api/tasks/${t.id}`).send({ status: "in_progress" }).expect(200); // same assignee: no repeat
+    const tc = (await owner.post(`/api/projects/${projectId}/tests`).send({ title: "Check" })).body;
+    await owner.patch(`/api/tests/${tc.id}`).send({ assigneeId: beaId }).expect(200);
+    await owner.post(`/api/projects/${projectId}/tasks`).send({ title: "Mine", assigneeId: ownerId }).expect(201);
+
+    const b = await inbox(bea);
+    expect(b.unreadCount).toBe(2);
+    expect(b.items).toEqual([
+      expect.objectContaining({ kind: "test_assigned", testCaseId: tc.id, testTitle: "Check", actorName: "Tester", read: false }),
+      expect.objectContaining({ kind: "task_assigned", taskId: t.id, taskTitle: "Build", projectId, projectName: "P1" }),
+    ]);
+    expect((await inbox(owner)).items).toEqual([]);
+    expect((await inbox(cal)).items).toEqual([]);
+  });
+
+  it("notifies mentioned people and task followers about comments", async () => {
+    const { owner, bea, cal, projectId, beaId } = await team();
+    const t = (await owner.post(`/api/projects/${projectId}/tasks`).send({ title: "A", assigneeId: beaId })).body;
+    await bea.post("/api/notifications/read-all").expect(204);
+
+    // Cal comments: Bea is the assignee (reply). Owner hasn't joined in yet.
+    await cal.post(`/api/tasks/${t.id}/comments`).send({ body: "Started" }).expect(201);
+    // Owner mentions Bea: Bea gets one mention (not also a reply); Cal follows the thread (reply).
+    const c2 = (await owner.post(`/api/tasks/${t.id}/comments`).send({ body: "@Bea Lee please review" })).body;
+    // Bea replies and mentions herself: no self-notification; owner and Cal are followers.
+    await bea.post(`/api/tasks/${t.id}/comments`).send({ body: "On it @Bea Lee" }).expect(201);
+
+    const b = (await inbox(bea)).items.filter((n: { read: boolean }) => !n.read);
+    expect(b.map((n: { kind: string }) => n.kind)).toEqual(["mention", "reply"]);
+    expect(b[0]).toMatchObject({ commentId: c2.id, taskId: t.id, excerpt: "@Bea Lee please review", actorName: "Tester" });
+
+    expect((await inbox(cal)).items.map((n: { kind: string }) => n.kind)).toEqual(["reply", "reply"]);
+    expect((await inbox(owner)).items).toEqual([
+      expect.objectContaining({ kind: "reply", actorName: "Bea Lee", excerpt: "On it @Bea Lee" }),
+    ]);
+  });
+
+  it("marks notifications read and unread, only for their owner", async () => {
+    const { owner, bea, projectId, beaId } = await team();
+    await owner.post(`/api/projects/${projectId}/tasks`).send({ title: "A", assigneeId: beaId });
+    await owner.post(`/api/projects/${projectId}/tasks`).send({ title: "B", assigneeId: beaId });
+    const [n1] = (await inbox(bea)).items;
+
+    await owner.patch(`/api/notifications/${n1.id}`).send({ read: true }).expect(404);
+    expect((await bea.patch(`/api/notifications/${n1.id}`).send({ read: true }).expect(200)).body.read).toBe(true);
+    await bea.patch(`/api/notifications/${n1.id}`).send({ read: "yes" }).expect(400);
+    let b = await inbox(bea);
+    expect(b.unreadCount).toBe(1);
+    const unread = (await bea.get("/api/notifications?unread=true").expect(200)).body;
+    expect(unread.items).toHaveLength(1);
+
+    await bea.patch(`/api/notifications/${n1.id}`).send({ read: false }).expect(200);
+    expect((await inbox(bea)).unreadCount).toBe(2);
+    await bea.post("/api/notifications/read-all").expect(204);
+    b = await inbox(bea);
+    expect(b.unreadCount).toBe(0);
+    expect(b.items.every((n: { read: boolean }) => n.read)).toBe(true);
+  });
+
+  it("drops notifications when their target is deleted or the recipient leaves", async () => {
+    const { owner, bea, cal, projectId, beaId, calId } = await team();
+    const t = (await owner.post(`/api/projects/${projectId}/tasks`).send({ title: "A", assigneeId: beaId })).body;
+    const c = (await owner.post(`/api/tasks/${t.id}/comments`).send({ body: "@Cal hi" })).body;
+    expect((await inbox(cal)).items).toHaveLength(1);
+    await owner.delete(`/api/comments/${c.id}`).expect(204);
+    expect((await inbox(cal)).items).toHaveLength(0);
+
+    expect((await inbox(bea)).items).toHaveLength(1);
+    await owner.delete(`/api/projects/${projectId}/members/${beaId}`).expect(204);
+    expect((await inbox(bea)).items).toHaveLength(0);
+
+    await owner.patch(`/api/tasks/${t.id}`).send({ assigneeId: calId }).expect(200);
+    expect((await inbox(cal)).items).toHaveLength(1);
+    await owner.delete(`/api/tasks/${t.id}`).expect(204);
+    expect((await inbox(cal)).items).toHaveLength(0);
+  });
+
+  it("requires a session", async () => {
+    const db = openDatabase(":memory:");
+    await request(createApp(db)).get("/api/notifications").expect(401);
+  });
+});
