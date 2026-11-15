@@ -7,25 +7,33 @@ export interface TaskNode<T extends TreeTask> {
   children: TaskNode<T>[];
 }
 
-/** Group tasks by parent id, each group sorted by position. */
-export function childrenIndex<T extends TreeTask>(tasks: T[]): Map<string | null, T[]> {
+const byPosition = (a: TreeTask, b: TreeTask) => a.position - b.position;
+
+/** Group tasks by parent id, each group sorted by position (or by `compare`). */
+export function childrenIndex<T extends TreeTask>(
+  tasks: T[],
+  compare: (a: T, b: T) => number = byPosition,
+): Map<string | null, T[]> {
   const idx = new Map<string | null, T[]>();
   for (const t of tasks) {
     const list = idx.get(t.parentId) ?? [];
     list.push(t);
     idx.set(t.parentId, list);
   }
-  for (const list of idx.values()) list.sort((a, b) => a.position - b.position);
+  for (const list of idx.values()) list.sort(compare);
   return idx;
 }
 
-/** Build a forest from a flat task list. Orphans (missing parent) become roots. */
-export function buildTree<T extends TreeTask>(tasks: T[]): TaskNode<T>[] {
+/**
+ * Build a forest from a flat task list. Orphans (missing parent) become roots.
+ * Siblings are ordered by position unless `compare` is given.
+ */
+export function buildTree<T extends TreeTask>(tasks: T[], compare?: (a: T, b: T) => number): TaskNode<T>[] {
   const ids = new Set(tasks.map((t) => t.id));
   const normalized = tasks.map((t) =>
     t.parentId && !ids.has(t.parentId) ? { ...t, parentId: null } : t,
   );
-  const idx = childrenIndex(normalized);
+  const idx = childrenIndex(normalized, compare);
   const build = (parentId: string | null): TaskNode<T>[] =>
     (idx.get(parentId) ?? []).map((task) => ({ task, children: build(task.id) }));
   return build(null);
@@ -80,4 +88,23 @@ export function ancestors<T extends TreeTask>(tasks: T[], id: string): T[] {
     cur = t.parentId;
   }
   return chain;
+}
+
+/**
+ * Ids of the tasks that match plus all their ancestors, so a filtered tree
+ * still shows where each match sits. Returns null when everything matches.
+ */
+export function matchesWithAncestors<T extends TreeTask>(tasks: T[], matches: (t: T) => boolean): Set<string> | null {
+  const matched = tasks.filter(matches);
+  if (matched.length === tasks.length) return null;
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const out = new Set<string>();
+  for (const t of matched) {
+    let cur: T | undefined = t;
+    while (cur && !out.has(cur.id)) {
+      out.add(cur.id);
+      cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+    }
+  }
+  return out;
 }

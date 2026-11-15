@@ -345,3 +345,11 @@ fieldset:disabled .md-tools button { cursor: default; }
 /* Keep long comments from taking over the overview panel. */
 .panel .comment .md { max-height: 10em; overflow: hidden; }
 @media (max-width: 700px) { .md-tools button { min-width: 32px; height: 32px; } }
+
+/* ---------- Due dates ---------- */
+.due { white-space: nowrap; }
+.due.overdue { color: var(--fail); font-weight: 600; }
+.due.today { color: var(--rev); font-weight: 600; }
+.due.overdue::before { content: "! "; }
+tr.context td { opacity: 0.55; }
+.card .card-due { font-size: 12px; color: var(--mute); margin-top: 6px; }

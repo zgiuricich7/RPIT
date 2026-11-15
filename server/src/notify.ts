@@ -10,7 +10,8 @@ import { newId } from "./db/index.ts";
 
 interface NotifyInput {
   recipients: Iterable<string | null | undefined>;
-  actorId: string;
+  /** Null for notifications the server sends itself (reminders). */
+  actorId: string | null;
   projectId: string;
   kind: NotificationKind;
   taskId?: string | null;

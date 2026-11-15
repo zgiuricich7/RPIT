@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { CommentInput, CommentPatch, TaskInput, TaskPatch, type Task } from "@rpit/shared";
+import { CommentInput, CommentPatch, START_AFTER_DUE, TaskInput, TaskPatch, type Task } from "@rpit/shared";
 import type { DB } from "../db/index.ts";
 import { newId, now, transaction } from "../db/index.ts";
 import { COMMENT_SELECT, getMemberRole, getTask, listTasks, toComment, toTestCase, wouldCreateCycle } from "../db/repo.ts";
@@ -56,8 +56,9 @@ export function taskRoutes(db: DB) {
     const id = newId();
     const task = transaction(db, () => {
       db.prepare(
-        `INSERT INTO tasks (id, project_id, parent_id, title, description, status, priority, assignee_id, position)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (id, project_id, parent_id, title, description, status, priority, assignee_id,
+           start_date, due_date, remind_assignee, position)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         projectId,
@@ -67,6 +68,9 @@ export function taskRoutes(db: DB) {
         input.status,
         input.priority,
         input.assigneeId,
+        input.startDate,
+        input.dueDate,
+        input.remindAssignee ? 1 : 0,
         nextPosition(projectId, input.parentId),
       );
       const t = requireTask(id);
@@ -101,10 +105,15 @@ export function taskRoutes(db: DB) {
     }
     if (p.assigneeId !== undefined && p.assigneeId !== cur.assigneeId) checkAssignee(db, cur.projectId, p.assigneeId);
     const merged = { ...cur, ...p, position };
+    // The schema checks the order when both dates are sent; this covers changing just one.
+    if (merged.startDate && merged.dueDate && merged.startDate > merged.dueDate) {
+      throw new HttpError(400, START_AFTER_DUE, { startDate: [START_AFTER_DUE] });
+    }
     const task = transaction(db, () => {
       db.prepare(
         `UPDATE tasks SET parent_id = ?, title = ?, description = ?, status = ?, priority = ?,
-           assignee_id = ?, position = ?, updated_at = ? WHERE id = ?`,
+           assignee_id = ?, start_date = ?, due_date = ?, remind_assignee = ?, position = ?, updated_at = ?
+         WHERE id = ?`,
       ).run(
         merged.parentId,
         merged.title,
@@ -112,6 +121,9 @@ export function taskRoutes(db: DB) {
         merged.status,
         merged.priority,
         merged.assigneeId,
+        merged.startDate,
+        merged.dueDate,
+        merged.remindAssignee ? 1 : 0,
         merged.position,
         now(),
         id,

@@ -25,7 +25,12 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
 
 ## 2. Tasks
 
-2.1 **Due dates and start dates**, overdue highlighting, sort/filter by due date.
+2.1 ~~**Due dates and start dates**~~ Done: calendar-date start and due dates on tasks; overdue (red) and
+    due-today (amber) highlighting in the list, board and the overview's "Needs attention"; a due filter
+    (overdue / next 7 days / none) and sort by due or start date, kept in the URL; and optional per-task
+    reminders (in-app) to the assignee on the start date, the day before it's due and on the due date.
+    Follow-up: reminders in the viewer's time zone (they use the server's date), emailed reminders (4.3),
+    dates on test cases, and a timeline view from start and due dates.
 2.2 **Reorder and re-parent by drag.** Swap native DnD for `@dnd-kit` (touch support), reorder
     within board columns and drag rows in the list to nest/un-nest. `position` is a REAL so you can
     insert between neighbours without renumbering.

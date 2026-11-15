@@ -123,6 +123,9 @@ function TaskDialog(props: {
     priority: task?.priority ?? ("medium" as Priority),
     assigneeId: task?.assigneeId ?? "",
     parentId: task?.parentId ?? props.defaultParentId ?? "",
+    startDate: task?.startDate ?? "",
+    dueDate: task?.dueDate ?? "",
+    remindAssignee: task?.remindAssignee ?? false,
   });
   const [error, setError] = useState<string | null>(null);
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
@@ -133,7 +136,13 @@ function TaskDialog(props: {
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    const body = { ...form, assigneeId: form.assigneeId || null, parentId: form.parentId || null };
+    const body = {
+      ...form,
+      assigneeId: form.assigneeId || null,
+      parentId: form.parentId || null,
+      startDate: form.startDate || null,
+      dueDate: form.dueDate || null,
+    };
     try {
       if (task) await update.mutateAsync({ id: task.id, ...body });
       else await create.mutateAsync(body);
@@ -209,6 +218,34 @@ function TaskDialog(props: {
               </select>
             </label>
           </div>
+          <div className="two">
+            <label className="field">
+              Start date
+              <input
+                type="date"
+                value={form.startDate}
+                max={form.dueDate || undefined}
+                onChange={(e) => set("startDate", e.target.value)}
+              />
+            </label>
+            <label className="field">
+              Due date
+              <input
+                type="date"
+                value={form.dueDate}
+                min={form.startDate || undefined}
+                onChange={(e) => set("dueDate", e.target.value)}
+              />
+            </label>
+          </div>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={form.remindAssignee}
+              onChange={(e) => set("remindAssignee", e.target.checked)}
+            />
+            Remind the assignee on the start date, the day before it's due and on the due date
+          </label>
         </fieldset>
         {error && <div className="form-error">{error}</div>}
         <div style={{ display: "flex", gap: 8 }}>

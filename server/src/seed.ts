@@ -8,6 +8,7 @@
 import { config } from "./config.ts";
 import { newId, openDatabase, transaction } from "./db/index.ts";
 import { hashPassword } from "./auth.ts";
+import { addDays, toCalendarDate } from "@rpit/shared";
 import { recordCommentActivity } from "./notify.ts";
 
 const db = openDatabase(config.databasePath);
@@ -57,6 +58,19 @@ transaction(db, () => {
   task("buttons", "lib", "Buttons and inputs", "in_review", "medium", priya, 1);
   task("table", "lib", "Data table", "todo", "medium", null, 2);
   task("content", "launch", "Migrate content", "todo", "high", maya, 2);
+
+  // Dates relative to today, so the demo always has something overdue and something due soon.
+  const today = toCalendarDate(new Date());
+  const setDates = db.prepare(`UPDATE tasks SET start_date = ?, due_date = ? WHERE id = ?`);
+  const dates = (key: string, start: number | null, due: number | null) =>
+    setDates.run(start === null ? null : addDays(today, start), due === null ? null : addDays(today, due), id(key));
+  dates("launch", -14, 21);
+  dates("ds", -14, 7);
+  dates("colors", -14, -7);
+  dates("buttons", -5, -1); // overdue
+  dates("table", 2, 5); // due soon
+  dates("content", null, 14);
+  for (const key of ["table", "content"]) db.prepare(`UPDATE tasks SET remind_assignee = 1 WHERE id = ?`).run(id(key));
 
   db.prepare(`INSERT INTO comments (id, task_id, author_id, body) VALUES (?, ?, ?, ?)`).run(
     newId(), id("table"), priya, "Waiting on the sort fix from the failing test before I pick this up.",

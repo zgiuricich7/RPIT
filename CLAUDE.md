@@ -25,6 +25,7 @@ Always run `npm run typecheck && npm test` before considering a change done.
 
 ```
 shared/   @rpit/shared — zod schemas, enums, labels, response types, tree utils, mention parsing,
+          calendar-date helpers (dates.ts: due state, due filters, sibling sort comparators),
           Markdown toolbar text transforms (markdown.ts, pure functions with tests).
           Imported as TypeScript source by both server and web (no build step).
 server/   Express 5 API on Node's built-in SQLite (node:sqlite, no native deps)
@@ -35,6 +36,7 @@ server/   Express 5 API on Node's built-in SQLite (node:sqlite, no native deps)
   src/auth.ts         bcrypt passwords, opaque session id in an httpOnly cookie
   src/access.ts       requireProjectRole middleware + project resolvers
   src/notify.ts       creates notifications (assignments, mentions, replies) and stores comment mentions
+  src/reminders.ts    sendTaskReminders(db, today) + the 15-minute scheduler started in index.ts
   src/activity.ts     logActivity + changes/snapshot diff helpers and the tracked fields per entity
   src/events.ts       in-process EventHub: logActivity publishes a ProjectEvent after commit
   src/routes/events.ts  GET /api/projects/:id/events — server-sent event stream per project
@@ -49,7 +51,7 @@ web/      React 19 + Vite + TanStack Query + React Router 7
   src/components/mentions.tsx  @-mention autocomplete textarea (used by MarkdownEditor)
   src/components/TopBar.tsx    header with project switcher and inbox badge
   src/components/activity.tsx  ActivityFeed: renders log entries as sentences + field changes
-  src/pages/          Overview, Tasks (List + Board), Tests, Members, Inbox, Auth
+  src/pages/          Overview, Tasks (List + Board, due filter and sort in ?due= / ?sort=), Tests, Members, Inbox, Auth
   src/styles.css      design tokens (light/dark) and all styles; plain CSS, no framework
 docs/ROADMAP.md       prioritised backlog
 ```
@@ -61,12 +63,17 @@ docs/ROADMAP.md       prioritised backlog
   zod enum). Both FKs cascade. The project creator becomes owner; every project keeps at least one owner.
 - `tasks.parent_id → tasks.id` (nullable, `ON DELETE CASCADE`) gives unlimited nesting.
   Deleting a task deletes its whole subtree and their comments.
+- `tasks.start_date` / `tasks.due_date` are nullable calendar dates (`YYYY-MM-DD` text, GLOB CHECK), not
+  timestamps. Start can't be after due: zod refines it when both are sent, the PATCH route checks the merged values.
+  `tasks.remind_assignee` (0/1) opts a task into date reminders; `task_reminders(task_id, kind, for_date)` records
+  reminders already sent so each goes out once (cascades from the task).
 - `comments.task_id → tasks.id` (cascade), `comments.author_id → users.id`; `edited_at` is set when the author edits
 - `test_cases.task_id → tasks.id` (`ON DELETE SET NULL`) — deleting a task unlinks tests, never deletes them.
 - `assignee_id` columns reference `users` with `SET NULL`.
 - `comment_mentions(comment_id, user_id)` — who a comment @-mentioned, computed once when it's posted.
 - `notifications(user_id, actor_id, project_id, kind, task_id, test_case_id, comment_id, read_at)` — one row
-  per recipient; `kind` is `task_assigned` / `test_assigned` / `mention` / `reply` (CHECK + `NotificationKind`).
+  per recipient; `kind` is `task_assigned` / `test_assigned` / `mention` / `reply` / `task_starts` /
+  `task_due_soon` / `task_due` (CHECK + `NotificationKind`; widening the CHECK means recreating the table).
   Cascades from the task, test case or comment it points at; removed when the recipient leaves the project.
 - `activity(project_id, actor_id, entity, entity_id, task_id, action, label, diff, created_at)` — the audit log.
   **No foreign keys** on project/entity/task ids so entries outlive what they describe; `label` snapshots the
@@ -86,6 +93,10 @@ docs/ROADMAP.md       prioritised backlog
 - **Tree rules are enforced server-side:** parent must be in the same project and can't be the task
   itself or a descendant (`wouldCreateCycle`, recursive CTE). Client filters the picker too, but the
   server is the authority.
+- **Dates are calendar dates, "today" is the viewer's.** Compare `YYYY-MM-DD` strings directly; never turn them
+  into `Date`s for logic (time zones shift them). Overdue = due before today and not done (`dueState` /
+  `isOverdue` in `shared/src/dates.ts`, with the local date from `useToday()`). The server never decides what's
+  overdue. Show due dates with `<DueDate>` (`web/src/components/ui.tsx`) and `formatDate` for plain dates.
 - **Progress = leaf tasks done / leaf tasks** (tasks with no children). Use `leafProgress` from shared;
   the server's `projectSummary` uses the same function, so overview numbers match the UI.
 - **Cache invalidation:** task/test/comment mutations invalidate `["project", projectId]`, which covers
@@ -113,6 +124,9 @@ docs/ROADMAP.md       prioritised backlog
 - **Notifications are in-app only** (no email). Create them with `notify` / `notifyAssignment` /
   `recordCommentActivity` from `server/src/notify.ts` after a write; they skip the actor and non-members.
   "Reply" means a new comment on a task you've commented on or are assigned to (comments are flat).
+  **Reminders** (`server/src/reminders.ts`) are the exception to "after a write": a scheduler (on startup, then every
+  15 min) notifies the assignee of open tasks with `remindAssignee` on the start date, the day before the due date
+  and on it, with `actorId: null`. They use the server's local date and aren't sent late if a day was missed.
   `/api/notifications` is user-scoped (ownership check, not `requireProjectRole`); the web polls it every 30s
   under the `["notifications"]` key.
 - **Real-time updates come from the activity log.** `logActivity` queues a `ProjectEvent` with `afterCommit`

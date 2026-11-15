@@ -148,4 +148,43 @@ export const migrations: string[] = [
   /* 5: editable comments */ `
   ALTER TABLE comments ADD COLUMN edited_at TEXT;
   `,
+
+  /* 6: task start and due dates (calendar dates, YYYY-MM-DD) and due-date reminders */ `
+  ALTER TABLE tasks ADD COLUMN start_date TEXT
+    CHECK (start_date IS NULL OR start_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]');
+  ALTER TABLE tasks ADD COLUMN due_date TEXT
+    CHECK (due_date IS NULL OR due_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]');
+  CREATE INDEX idx_tasks_due ON tasks(project_id, due_date);
+
+  -- Opt-in per task: remind the assignee on the start date, the day before the due date and on it.
+  ALTER TABLE tasks ADD COLUMN remind_assignee INTEGER NOT NULL DEFAULT 0 CHECK (remind_assignee IN (0, 1));
+
+  -- Reminders already sent, so each (task, kind, date) is sent once. Moving a date allows a new one.
+  CREATE TABLE task_reminders (
+    task_id  TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    kind     TEXT NOT NULL,
+    for_date TEXT NOT NULL,
+    PRIMARY KEY (task_id, kind, for_date)
+  );
+
+  -- Recreate notifications to widen the kind CHECK with the reminder kinds (nothing references this table).
+  CREATE TABLE notifications_new (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    actor_id     TEXT REFERENCES users(id) ON DELETE SET NULL,
+    project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    kind         TEXT NOT NULL CHECK (kind IN ('task_assigned','test_assigned','mention','reply',
+                                               'task_starts','task_due_soon','task_due')),
+    task_id      TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+    test_case_id TEXT REFERENCES test_cases(id) ON DELETE CASCADE,
+    comment_id   TEXT REFERENCES comments(id) ON DELETE CASCADE,
+    read_at      TEXT,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  INSERT INTO notifications_new SELECT id, user_id, actor_id, project_id, kind, task_id, test_case_id,
+    comment_id, read_at, created_at FROM notifications;
+  DROP TABLE notifications;
+  ALTER TABLE notifications_new RENAME TO notifications;
+  CREATE INDEX idx_notifications_user ON notifications(user_id, created_at);
+  `,
 ];

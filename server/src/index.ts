@@ -1,9 +1,12 @@
 import { createApp } from "./app.ts";
 import { config } from "./config.ts";
 import { openDatabase } from "./db/index.ts";
+import { startReminderScheduler } from "./reminders.ts";
 
 const db = openDatabase(config.databasePath);
 const app = createApp(db, { staticDir: config.isProduction ? config.webDist : undefined });
+
+const stopReminders = startReminderScheduler(db);
 
 const server = app.listen(config.port, () => {
   console.log(`RPIT API listening on http://localhost:${config.port}`);
@@ -11,6 +14,7 @@ const server = app.listen(config.port, () => {
 });
 
 const shutdown = () => {
+  stopReminders();
   server.close(() => {
     db.close();
     process.exit(0);

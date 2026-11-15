@@ -1,14 +1,17 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import {
+  dueState,
+  toCalendarDate,
   PRIORITY_LABELS,
   TASK_STATUS_LABELS,
   TEST_STATUS_LABELS,
   type Priority,
+  type Task,
   type TaskStatus,
   type TestStatus,
   type User,
 } from "@rpit/shared";
-import { pct } from "../lib/format.ts";
+import { formatDate, pct } from "../lib/format.ts";
 
 export function Modal(props: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -70,3 +73,23 @@ export function Options<K extends string>({ labels }: { labels: Record<K, string
 }
 
 export const priorityLabel = (p: Priority) => PRIORITY_LABELS[p];
+
+/** The viewer's local date as YYYY-MM-DD; due states are computed against it. */
+export const useToday = () => toCalendarDate(new Date());
+
+/**
+ * A task's due date, highlighted when overdue or due today (done tasks are
+ * never highlighted). `compact` shows just the date, for table cells.
+ */
+export function DueDate({ task, today, compact }: { task: Pick<Task, "status" | "dueDate">; today: string; compact?: boolean }) {
+  if (!task.dueDate) return compact ? <span className="muted">—</span> : null;
+  const state = dueState(task, today);
+  const date = formatDate(task.dueDate);
+  const full = state === "overdue" ? `Overdue, due ${date}` : state === "today" ? "Due today" : `Due ${date}`;
+  const text = compact ? date : state === "overdue" ? `Overdue · ${date}` : full;
+  return (
+    <span className={`due ${state ?? ""}`} title={full} aria-label={full}>
+      {text}
+    </span>
+  );
+}

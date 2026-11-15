@@ -18,7 +18,7 @@ import {
   type User,
 } from "@rpit/shared";
 import { useTasks, useTests, useUsers } from "../api/hooks.ts";
-import { formatDateTime } from "../lib/format.ts";
+import { formatDate, formatDateTime } from "../lib/format.ts";
 import { useDialogs } from "./dialogs.tsx";
 
 /** Where the feed is shown. Inside a task or test, "this task" replaces its title. */
@@ -32,6 +32,9 @@ const FIELD_LABELS: Record<string, string> = {
   priority: "Priority",
   assigneeId: "Assignee",
   parentId: "Parent task",
+  startDate: "Start date",
+  dueDate: "Due date",
+  remindAssignee: "Reminders",
   taskId: "Linked task",
   steps: "Steps",
   expected: "Expected result",
@@ -52,6 +55,8 @@ function formatValue(a: Activity, field: string, v: FieldChange["from"], l: Look
   if (field === "assigneeId") return v ? (l.users.find((u) => u.id === v)?.name ?? "a former user") : "Unassigned";
   if (field === "parentId") return v ? (l.tasks.find((t) => t.id === v)?.title ?? "a deleted task") : "Top level";
   if (field === "taskId") return v ? (l.tasks.find((t) => t.id === v)?.title ?? "a deleted task") : "None";
+  if (field === "startDate" || field === "dueDate") return v ? formatDate(String(v)) : "None";
+  if (field === "remindAssignee") return v ? "On" : "Off";
   if (v === null || v === "") return "empty";
   if (field === "status") {
     return a.entity === "test_case" ? TEST_STATUS_LABELS[v as TestStatus] : TASK_STATUS_LABELS[v as TaskStatus];

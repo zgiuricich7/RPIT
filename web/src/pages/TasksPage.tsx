@@ -1,22 +1,42 @@
 import { useMemo, useState, type DragEvent } from "react";
 import { useOutletContext, useSearchParams } from "react-router-dom";
 import {
+  DUE_FILTERS,
+  DUE_FILTER_LABELS,
+  TASK_SORTS,
+  TASK_SORT_LABELS,
   TASK_STATUSES,
   TASK_STATUS_LABELS,
   ancestors,
   buildTree,
   childrenIndex,
+  compareTasks,
   hasRole,
   leafProgress,
+  matchesDueFilter,
+  matchesWithAncestors,
+  type DueFilter,
   type Project,
   type Task,
   type TaskNode,
+  type TaskSort,
   type TaskStatus,
   type User,
 } from "@rpit/shared";
 import { useTasks, useUpdateTask, useUsers } from "../api/hooks.ts";
 import { useDialogs } from "../components/dialogs.tsx";
-import { AssigneeName, Meter, TaskStatusPill, priorityLabel } from "../components/ui.tsx";
+import { AssigneeName, DueDate, Meter, Options, TaskStatusPill, priorityLabel, useToday } from "../components/ui.tsx";
+import { formatDate } from "../lib/format.ts";
+
+/** Due filter and sort order, kept in the URL (?due=overdue&sort=due) so a view can be shared. */
+interface ViewOptions {
+  due: DueFilter;
+  sort: TaskSort;
+  today: string;
+}
+
+const pick = <T extends string>(value: string | null, allowed: readonly T[], fallback: T): T =>
+  allowed.includes(value as T) ? (value as T) : fallback;
 
 export function TasksPage() {
   const project = useOutletContext<Project>();
@@ -26,13 +46,22 @@ export function TasksPage() {
   const users = useUsers().data;
   const dialogs = useDialogs();
   const canEdit = hasRole(project.role, "editor");
+  const today = useToday();
+  const opts: ViewOptions = {
+    due: pick(sp.get("due"), DUE_FILTERS, "all"),
+    sort: pick(sp.get("sort"), TASK_SORTS, "manual"),
+    today,
+  };
 
-  const setView = (v: "list" | "board") =>
+  /** Set a URL param, dropping it when it's back to its default. */
+  const setParam = (key: string, value: string, fallback?: string) =>
     setSp((prev) => {
       const next = new URLSearchParams(prev);
-      next.set("view", v);
+      if (value === fallback) next.delete(key);
+      else next.set(key, value);
       return next;
     });
+  const setView = (v: "list" | "board") => setParam("view", v);
 
   return (
     <>
@@ -45,6 +74,26 @@ export function TasksPage() {
             Board
           </button>
         </div>
+        <select
+          className="inline"
+          aria-label="Filter by due date"
+          value={opts.due}
+          onChange={(e) => setParam("due", e.target.value, "all")}
+        >
+          <Options labels={DUE_FILTER_LABELS} />
+        </select>
+        <select
+          className="inline"
+          aria-label="Sort tasks"
+          value={opts.sort}
+          onChange={(e) => setParam("sort", e.target.value, "manual")}
+        >
+          {TASK_SORTS.map((k) => (
+            <option key={k} value={k}>
+              Sort: {TASK_SORT_LABELS[k]}
+            </option>
+          ))}
+        </select>
         <span className="spacer" />
         {canEdit && (
           <button className="btn primary" onClick={() => dialogs.newTask()}>
@@ -61,9 +110,9 @@ export function TasksPage() {
           {canEdit ? "No tasks yet. Choose New task to add your first one." : "No tasks yet."}
         </div>
       ) : view === "list" ? (
-        <ListView tasks={tasks.data} users={users} canEdit={canEdit} />
+        <ListView tasks={tasks.data} users={users} canEdit={canEdit} opts={opts} />
       ) : (
-        <BoardView projectId={project.id} tasks={tasks.data} users={users} canEdit={canEdit} />
+        <BoardView projectId={project.id} tasks={tasks.data} users={users} canEdit={canEdit} opts={opts} />
       )}
     </>
   );
@@ -71,9 +120,19 @@ export function TasksPage() {
 
 // ---------------------------------------------------------------------------
 
-function ListView({ tasks, users, canEdit }: { tasks: Task[]; users: User[] | undefined; canEdit: boolean }) {
+function ListView(props: { tasks: Task[]; users: User[] | undefined; canEdit: boolean; opts: ViewOptions }) {
+  const { tasks, users, canEdit, opts } = props;
+  const { due, sort, today } = opts;
   const dialogs = useDialogs();
-  const tree = useMemo(() => buildTree(tasks), [tasks]);
+  // Matching tasks plus their ancestors (dimmed, for context); null when nothing is filtered out.
+  const visible = useMemo(
+    () => (due === "all" ? null : matchesWithAncestors(tasks, (t) => matchesDueFilter(t, due, today))),
+    [tasks, due, today],
+  );
+  const tree = useMemo(
+    () => buildTree(visible ? tasks.filter((t) => visible.has(t.id)) : tasks, compareTasks(sort)),
+    [tasks, visible, sort],
+  );
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const parents = useMemo(() => tasks.filter((t) => tasks.some((c) => c.parentId === t.id)).map((t) => t.id), [tasks]);
 
@@ -89,8 +148,9 @@ function ListView({ tasks, users, canEdit }: { tasks: Task[]; users: User[] | un
   const walk = (nodes: TaskNode<Task>[], depth: number) => {
     for (const { task: t, children } of nodes) {
       const open = !collapsed.has(t.id);
+      const context = due !== "all" && !matchesDueFilter(t, due, today);
       rows.push(
-        <tr key={t.id}>
+        <tr key={t.id} className={context ? "context" : undefined}>
           <td>
             <div className="tree-name" style={{ paddingLeft: depth * 22 }}>
               <button
@@ -113,6 +173,10 @@ function ListView({ tasks, users, canEdit }: { tasks: Task[]; users: User[] | un
           <td>{priorityLabel(t.priority)}</td>
           <td>
             <AssigneeName id={t.assigneeId} users={users} />
+          </td>
+          <td>{t.startDate ? formatDate(t.startDate) : <span className="muted">—</span>}</td>
+          <td>
+            <DueDate task={t} today={today} compact />
           </td>
           <td>{children.length > 0 && <Meter {...leafProgress(tasks, t.id)} />}</td>
           <td className="actions">
@@ -139,7 +203,10 @@ function ListView({ tasks, users, canEdit }: { tasks: Task[]; users: User[] | un
           Collapse all
         </button>
       </div>
-      <div className="scroll-x">
+      {!rows.length ? (
+        <div className="empty">No tasks match this filter.</div>
+      ) : (
+        <div className="scroll-x">
         <table className="grid">
           <thead>
             <tr>
@@ -147,21 +214,31 @@ function ListView({ tasks, users, canEdit }: { tasks: Task[]; users: User[] | un
               <th>Status</th>
               <th>Priority</th>
               <th>Assignee</th>
+              <th>Start</th>
+              <th>Due</th>
               <th>Progress</th>
               <th />
             </tr>
           </thead>
           <tbody>{rows}</tbody>
         </table>
-      </div>
+        </div>
+      )}
     </>
   );
 }
 
 // ---------------------------------------------------------------------------
 
-function BoardView(props: { projectId: string; tasks: Task[]; users: User[] | undefined; canEdit: boolean }) {
+function BoardView(props: {
+  projectId: string;
+  tasks: Task[];
+  users: User[] | undefined;
+  canEdit: boolean;
+  opts: ViewOptions;
+}) {
   const { projectId, tasks, users, canEdit } = props;
+  const { due, sort, today } = props.opts;
   const dialogs = useDialogs();
   const update = useUpdateTask(projectId);
   const [leafOnly, setLeafOnly] = useState(false);
@@ -189,7 +266,10 @@ function BoardView(props: { projectId: string; tasks: Task[]; users: User[] | un
       </div>
       <div className="board">
         {TASK_STATUSES.map((status) => {
-          const list = tasks.filter((t) => t.status === status && (!leafOnly || !hasKids(t.id)));
+          const list = tasks.filter(
+            (t) => t.status === status && (!leafOnly || !hasKids(t.id)) && matchesDueFilter(t, due, today),
+          );
+          if (sort !== "manual") list.sort(compareTasks(sort));
           return (
             <section
               key={status}
@@ -227,6 +307,11 @@ function BoardView(props: { projectId: string; tasks: Task[]; users: User[] | un
                       {t.title}
                     </button>
                     {hasKids(t.id) && <Meter {...leafProgress(tasks, t.id)} />}
+                    {t.dueDate && (
+                      <div className="card-due">
+                        <DueDate task={t} today={today} />
+                      </div>
+                    )}
                     <div className="meta">
                       <span>
                         <AssigneeName id={t.assigneeId} users={users} />

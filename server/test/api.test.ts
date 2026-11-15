@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.ts";
 import { openDatabase } from "../src/db/index.ts";
+import { sendTaskReminders } from "../src/reminders.ts";
 
 /** Fresh in-memory DB + signed-in agent for each test. */
 async function setup() {
@@ -613,5 +614,90 @@ describe("editing comments", () => {
 
     const dropped = (await agent.patch(`/api/comments/${c.id}`).send({ body: "Never mind" })).body;
     expect(dropped.mentions).toEqual([]);
+  });
+});
+
+describe("task dates", () => {
+  it("stores, updates, clears and logs start and due dates", async () => {
+    const { agent, projectId } = ctx;
+    const t = (
+      await agent
+        .post(`/api/projects/${projectId}/tasks`)
+        .send({ title: "Dated", startDate: "2026-03-01", dueDate: "2026-03-10" })
+        .expect(201)
+    ).body;
+    expect(t).toMatchObject({ startDate: "2026-03-01", dueDate: "2026-03-10" });
+
+    const moved = (await agent.patch(`/api/tasks/${t.id}`).send({ dueDate: "2026-03-20" }).expect(200)).body;
+    expect(moved).toMatchObject({ startDate: "2026-03-01", dueDate: "2026-03-20" });
+    const cleared = (await agent.patch(`/api/tasks/${t.id}`).send({ startDate: null }).expect(200)).body;
+    expect(cleared.startDate).toBeNull();
+
+    const log = (await agent.get(`/api/tasks/${t.id}/activity`).expect(200)).body.items;
+    expect(log[0].diff).toEqual({ startDate: { from: "2026-03-01", to: null } });
+    expect(log[1].diff).toEqual({ dueDate: { from: "2026-03-10", to: "2026-03-20" } });
+    expect(log[2].diff.dueDate).toEqual({ from: null, to: "2026-03-10" });
+  });
+
+  it("rejects invalid dates and a start after the due date", async () => {
+    const { agent, projectId } = ctx;
+    const bad = await agent.post(`/api/projects/${projectId}/tasks`).send({ title: "X", dueDate: "2026-02-30" }).expect(400);
+    expect(bad.body.fieldErrors.dueDate).toBeDefined();
+    await agent
+      .post(`/api/projects/${projectId}/tasks`)
+      .send({ title: "X", startDate: "2026-03-02", dueDate: "2026-03-01" })
+      .expect(400);
+
+    // Changing one date is checked against the stored other date.
+    const t = (await agent.post(`/api/projects/${projectId}/tasks`).send({ title: "Y", dueDate: "2026-03-10" })).body;
+    const res = await agent.patch(`/api/tasks/${t.id}`).send({ startDate: "2026-03-11" }).expect(400);
+    expect(res.body.fieldErrors.startDate).toEqual(["Start date can't be after the due date"]);
+    await agent.patch(`/api/tasks/${t.id}`).send({ startDate: "2026-03-10" }).expect(200);
+    await agent.patch(`/api/tasks/${t.id}`).send({ dueDate: "2026-03-09" }).expect(400);
+  });
+});
+
+describe("due-date reminders", () => {
+  const inbox = async () => (await ctx.agent.get("/api/notifications").expect(200)).body.items as { kind: string; taskId: string; actorId: string | null }[];
+  const mk = (body: Record<string, unknown>) =>
+    ctx.agent.post(`/api/projects/${ctx.projectId}/tasks`).send({ title: "R", assigneeId: ctx.userId, ...body }).expect(201);
+
+  it("reminds the assignee on the start date, the day before due and on the due date, once each", async () => {
+    const t = (await mk({ startDate: "2026-03-01", dueDate: "2026-03-05", remindAssignee: true })).body;
+    expect(t.remindAssignee).toBe(true);
+
+    expect(sendTaskReminders(ctx.db, "2026-02-28")).toBe(0);
+    expect(sendTaskReminders(ctx.db, "2026-03-01")).toBe(1);
+    expect(sendTaskReminders(ctx.db, "2026-03-01")).toBe(0); // already sent today
+    expect(sendTaskReminders(ctx.db, "2026-03-04")).toBe(1);
+    expect(sendTaskReminders(ctx.db, "2026-03-05")).toBe(1);
+    const items = await inbox();
+    expect(items.map((n) => n.kind)).toEqual(["task_due", "task_due_soon", "task_starts"]);
+    expect(items.every((n) => n.taskId === t.id && n.actorId === null)).toBe(true);
+
+    // Moving the due date allows a new reminder for the new date.
+    await ctx.agent.patch(`/api/tasks/${t.id}`).send({ dueDate: "2026-03-10" }).expect(200);
+    expect(sendTaskReminders(ctx.db, "2026-03-10")).toBe(1);
+  });
+
+  it("sends nothing unless opted in, assigned and still open", async () => {
+    await mk({ dueDate: "2026-03-05" }); // not opted in
+    await mk({ dueDate: "2026-03-05", remindAssignee: true, assigneeId: null });
+    await mk({ dueDate: "2026-03-05", remindAssignee: true, status: "done" });
+    expect(sendTaskReminders(ctx.db, "2026-03-05")).toBe(0);
+    expect(await inbox()).toEqual([]);
+  });
+
+  it("sends one due reminder when a task starts and is due the same day", async () => {
+    await mk({ startDate: "2026-03-05", dueDate: "2026-03-05", remindAssignee: true });
+    expect(sendTaskReminders(ctx.db, "2026-03-05")).toBe(1);
+    expect((await inbox()).map((n) => n.kind)).toEqual(["task_due"]);
+  });
+
+  it("logs turning reminders on and off", async () => {
+    const t = (await mk({ dueDate: "2026-03-05" })).body;
+    await ctx.agent.patch(`/api/tasks/${t.id}`).send({ remindAssignee: true }).expect(200);
+    const log = (await ctx.agent.get(`/api/tasks/${t.id}/activity`).expect(200)).body.items;
+    expect(log[0].diff).toEqual({ remindAssignee: { from: false, to: true } });
   });
 });

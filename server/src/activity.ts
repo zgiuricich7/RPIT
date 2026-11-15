@@ -17,7 +17,17 @@ type Value = FieldChange["from"];
 type Fields<T> = readonly (keyof T & string)[];
 
 /** Tracked fields per entity. Internal fields (position, timestamps) are left out. */
-export const TASK_FIELDS = ["title", "description", "status", "priority", "assigneeId", "parentId"] as const;
+export const TASK_FIELDS = [
+  "title",
+  "description",
+  "status",
+  "priority",
+  "assigneeId",
+  "parentId",
+  "startDate",
+  "dueDate",
+  "remindAssignee",
+] as const;
 export const TEST_FIELDS = ["title", "status", "priority", "assigneeId", "taskId", "steps", "expected", "notes"] as const;
 export const PROJECT_FIELDS = ["name", "description"] as const;
 

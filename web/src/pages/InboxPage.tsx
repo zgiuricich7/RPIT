@@ -17,6 +17,12 @@ function describe(n: Notification) {
       return `${who} mentioned you on`;
     case "reply":
       return `${who} commented on`;
+    case "task_starts":
+      return "Starts today:";
+    case "task_due_soon":
+      return "Due tomorrow:";
+    case "task_due":
+      return "Due today:";
   }
 }
 
@@ -63,7 +69,7 @@ export function InboxPage() {
           <div className="empty">
             {onlyUnread
               ? "No unread notifications."
-              : "Nothing here yet. You'll be notified when someone assigns you work, mentions you, or comments on a task you're following."}
+              : "Nothing here yet. You'll be notified when someone assigns you work, mentions you, or comments on a task you're following, and reminded about dates on tasks with reminders turned on."}
           </div>
         ) : (
           <ul className="inbox-list">

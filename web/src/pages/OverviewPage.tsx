@@ -6,6 +6,8 @@ import {
   TEST_STATUSES,
   TEST_STATUS_LABELS,
   buildTree,
+  compareTasks,
+  isOverdue,
   leafProgress,
   type Project,
   type TaskStatus,
@@ -22,7 +24,7 @@ import {
 import { ProjectDialog, useDialogs } from "../components/dialogs.tsx";
 import { ActivityFeed } from "../components/activity.tsx";
 import { CommentBody, MarkdownView } from "../components/markdown.tsx";
-import { Meter, Stack, TaskStatusPill, TestStatusPill } from "../components/ui.tsx";
+import { DueDate, Meter, Stack, TaskStatusPill, TestStatusPill, useToday } from "../components/ui.tsx";
 import { formatDateTime } from "../lib/format.ts";
 import { TEST_COLORS } from "./TestsPage.tsx";
 
@@ -45,11 +47,17 @@ export function OverviewPage() {
   const del = useDeleteProject();
   const activity = useProjectActivity(project.id);
   const [editing, setEditing] = useState(false);
+  const today = useToday();
 
   const top = buildTree(tasks);
   const hasKids = new Set(tasks.map((t) => t.parentId).filter(Boolean));
   const attentionTests = tests.filter((t) => t.status === "failed" || t.status === "blocked");
-  const attentionTasks = tasks.filter((t) => t.priority === "high" && t.status !== "done" && !hasKids.has(t.id));
+  // Overdue counts every open task (parents included): a missed deadline matters at any level.
+  const overdueTasks = tasks.filter((t) => isOverdue(t, today)).sort(compareTasks("due"));
+  const overdueIds = new Set(overdueTasks.map((t) => t.id));
+  const attentionTasks = tasks.filter(
+    (t) => t.priority === "high" && t.status !== "done" && !hasKids.has(t.id) && !overdueIds.has(t.id),
+  );
 
   async function remove() {
     if (projects.length < 2) {
@@ -97,6 +105,7 @@ export function OverviewPage() {
             {stat(`${summary.percentComplete}%`, `Complete (${summary.leafDoneCount} of ${summary.leafCount} tasks without subtasks)`)}
             {stat(summary.taskCount, "Total tasks")}
             {stat(summary.openTaskCount, "Open tasks")}
+            {stat(overdueTasks.length, "Overdue tasks", overdueTasks.length ? "s-failed" : "")}
             {stat(summary.passRate === null ? "None" : `${summary.passRate}%`, "Test pass rate")}
             {stat(summary.testsByStatus.failed, "Failed tests", "s-failed")}
             {stat(summary.commentCount, "Comments")}
@@ -143,9 +152,17 @@ export function OverviewPage() {
         </div>
         <div className="panel">
           <h3>Needs attention</h3>
-          {!attentionTests.length && !attentionTasks.length && (
-            <div className="muted">No failing or blocked tests and no open high-priority tasks.</div>
+          {!attentionTests.length && !attentionTasks.length && !overdueTasks.length && (
+            <div className="muted">No overdue tasks, failing or blocked tests, or open high-priority tasks.</div>
           )}
+          {overdueTasks.map((t) => (
+            <div className="prow" key={t.id}>
+              <button className="title-btn" onClick={() => dialogs.openTask(t.id)}>
+                {t.title}
+              </button>
+              <DueDate task={t} today={today} />
+            </div>
+          ))}
           {attentionTests.map((t) => (
             <div className="prow" key={t.id}>
               <button className="title-btn" onClick={() => dialogs.openTest(t.id)}>

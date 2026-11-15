@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isCalendarDate } from "./dates.ts";
 
 /**
  * Single source of truth for enums, request bodies and response shapes.
@@ -57,6 +58,14 @@ const id = z.string().min(1);
 const nullableId = id.nullable();
 const title = z.string().trim().min(1, "Title is required").max(200);
 const longText = z.string().max(20_000);
+/** A calendar date ("YYYY-MM-DD") or null to clear it. */
+const calendarDate = z
+  .string()
+  .refine(isCalendarDate, "Enter a date as YYYY-MM-DD")
+  .nullable();
+const START_AFTER_DUE = "Start date can't be after the due date";
+const datesInOrder = (t: { startDate?: string | null; dueDate?: string | null }) =>
+  !t.startDate || !t.dueDate || t.startDate <= t.dueDate;
 
 // ---------- Auth ----------
 export const RegisterInput = z.object({
@@ -104,7 +113,14 @@ export const TaskInput = z.object({
   priority: Priority.default("medium"),
   assigneeId: nullableId.default(null),
   parentId: nullableId.default(null),
-});
+  startDate: calendarDate.default(null),
+  dueDate: calendarDate.default(null),
+  remindAssignee: z.boolean().default(false),
+}).refine(datesInOrder, { message: START_AFTER_DUE, path: ["startDate"] });
+/**
+ * When only one date is sent, the server checks the order against the stored
+ * other date; this refine covers patches that send both.
+ */
 export const TaskPatch = z
   .object({
     title,
@@ -113,8 +129,13 @@ export const TaskPatch = z
     priority: Priority,
     assigneeId: nullableId,
     parentId: nullableId,
+    startDate: calendarDate,
+    dueDate: calendarDate,
+    remindAssignee: z.boolean(),
   })
-  .partial();
+  .partial()
+  .refine(datesInOrder, { message: START_AFTER_DUE, path: ["startDate"] });
+export { START_AFTER_DUE };
 export type TaskInput = z.input<typeof TaskInput>;
 export type TaskPatch = z.infer<typeof TaskPatch>;
 
@@ -128,7 +149,19 @@ export const CommentPatch = CommentInput;
 export type CommentPatch = z.infer<typeof CommentPatch>;
 
 // ---------- Notifications ----------
-export const NOTIFICATION_KINDS = ["task_assigned", "test_assigned", "mention", "reply"] as const;
+/**
+ * `task_starts` / `task_due_soon` (the day before) / `task_due` are reminders for
+ * tasks with `remindAssignee` on; they have no actor (sent by the server).
+ */
+export const NOTIFICATION_KINDS = [
+  "task_assigned",
+  "test_assigned",
+  "mention",
+  "reply",
+  "task_starts",
+  "task_due_soon",
+  "task_due",
+] as const;
 export const NotificationKind = z.enum(NOTIFICATION_KINDS);
 export type NotificationKind = z.infer<typeof NotificationKind>;
 export const NotificationPatch = z.object({ read: z.boolean() });
@@ -203,6 +236,11 @@ export interface Task {
   status: TaskStatus;
   priority: Priority;
   assigneeId: string | null;
+  /** Calendar dates, "YYYY-MM-DD". */
+  startDate: string | null;
+  dueDate: string | null;
+  /** Send the assignee in-app reminders on the start date, the day before the due date and on it. */
+  remindAssignee: boolean;
   position: number;
   commentCount: number;
   createdAt: string;
