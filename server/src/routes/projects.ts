@@ -10,6 +10,8 @@ import { changes, logActivity, PROJECT_FIELDS, snapshot } from "../activity.ts";
 import { syncProjectSubtasksDone } from "../rollup.ts";
 import { createDefaultColumns } from "../columns.ts";
 import { attachmentIds, removeFilesAfterCommit } from "../uploads.ts";
+import { applyTemplate } from "../templates.ts";
+import { getVisibleTemplate } from "./templates.ts";
 
 export function projectRoutes(db: DB) {
   const r = Router();
@@ -33,10 +35,15 @@ export function projectRoutes(db: DB) {
     res.json(rows.map(toProject));
   });
 
-  /** The creator becomes the project's owner. */
+  /**
+   * The creator becomes the project's owner. With `templateId`, the project starts with the template's
+   * columns, labels, tasks, suites, tests and plans; that's logged as one entry (the project's, naming the
+   * template), not one per row.
+   */
   r.post("/", async (req, res) => {
     const input = parseBody(ProjectInput, req.body);
     const user = currentUser(req);
+    const template = input.templateId ? await getVisibleTemplate(db, input.templateId, user.id) : null;
     const id = newId();
     await transaction(db, async () => {
       await db.run(
@@ -47,12 +54,11 @@ export function projectRoutes(db: DB) {
         input.notifySubtasksDone ? 1 : 0,
       );
       await db.run(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'owner')`, id, user.id);
-      await createDefaultColumns(db, id);
-      await logActivity(db, {
-        ...projectEntry(id, user.id, input.name),
-        action: "created",
-        diff: snapshot(input, PROJECT_FIELDS, "created"),
-      });
+      if (template) await applyTemplate(db, id, template.content);
+      else await createDefaultColumns(db, id);
+      const diff = snapshot(input, PROJECT_FIELDS, "created");
+      if (template) diff.template = { from: null, to: template.row.name as string };
+      await logActivity(db, { ...projectEntry(id, user.id, input.name), action: "created", diff });
       await logActivity(db, {
         projectId: id,
         actorId: user.id,

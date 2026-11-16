@@ -1786,6 +1786,152 @@ describe("home dashboard", () => {
   });
 });
 
+describe("project templates", () => {
+  type Ent = { id: string; [k: string]: unknown };
+  const list = async (path: string, agent = ctx.agent) => (await agent.get(path).expect(200)).body as Ent[];
+
+  /** P1 gets custom columns, labels, a nested task tree, suites, a test with steps, and plans. */
+  async function buildSource() {
+    const { agent, projectId, userId } = ctx;
+    const p = `/api/projects/${projectId}`;
+    const qa = (await agent.post(`${p}/columns`).send({ name: "QA", category: "in_review" }).expect(201)).body;
+    const bug = (await agent.post(`${p}/labels`).send({ name: "Bug", color: "red" }).expect(201)).body;
+    const parent = (
+      await agent
+        .post(`${p}/tasks`)
+        .send({ title: "Epic", description: "Big", priority: "high", assigneeId: userId, dueDate: "2030-01-01" })
+        .expect(201)
+    ).body;
+    const child = (
+      await agent.post(`${p}/tasks`).send({ title: "Story", parentId: parent.id, columnId: qa.id, labelIds: [bug.id] }).expect(201)
+    ).body;
+    await agent.post(`/api/tasks/${child.id}/comments`).send({ body: "Not copied" }).expect(201);
+    const suite = (await agent.post(`${p}/suites`).send({ name: "Smoke" }).expect(201)).body;
+    const sub = (await agent.post(`${p}/suites`).send({ name: "Login", parentId: suite.id }).expect(201)).body;
+    const test = (
+      await agent
+        .post(`${p}/tests`)
+        .send({ title: "Signs in", suiteId: sub.id, taskId: child.id, status: "passed", steps: [{ action: "Go", expected: "Ok" }] })
+        .expect(201)
+    ).body;
+    await agent.post(`${p}/plans`).send({ name: "Release 1", testCaseIds: [test.id] }).expect(201);
+    const closed = (await agent.post(`${p}/plans`).send({ name: "Old cycle" }).expect(201)).body;
+    await agent.patch(`/api/plans/${closed.id}`).send({ closed: true }).expect(200);
+  }
+
+  it("saves a project's structure and creates new projects from it", async () => {
+    const { agent, projectId } = ctx;
+    await buildSource();
+    const t = (await agent.post("/api/templates").send({ projectId, name: "Release kit", description: "Use me" }).expect(201)).body;
+    expect(t).toMatchObject({
+      name: "Release kit",
+      isOwner: true,
+      everyone: false,
+      sharedWith: [],
+      sourceProjectId: projectId,
+      counts: { columns: 5, labels: 1, tasks: 2, suites: 2, tests: 1, plans: 1 },
+    });
+
+    const np = (await agent.post("/api/projects").send({ name: "From kit", templateId: t.id }).expect(201)).body;
+    const p = `/api/projects/${np.id}`;
+    const columns = await list(`${p}/columns`);
+    expect(columns.map((c) => c.name)).toEqual(["To do", "In progress", "In review", "Done", "QA"]);
+    const [label] = await list(`${p}/labels`);
+    expect(label).toMatchObject({ name: "Bug", color: "red" });
+    const tasks = await list(`${p}/tasks`);
+    const epic = tasks.find((x) => x.title === "Epic")!;
+    const story = tasks.find((x) => x.title === "Story")!;
+    // Structure is copied; people, dates and comments aren't.
+    expect(epic).toMatchObject({ description: "Big", priority: "high", assigneeId: null, dueDate: null, parentId: null });
+    expect(story).toMatchObject({
+      parentId: epic.id,
+      columnId: columns.find((c) => c.name === "QA")!.id,
+      status: "in_review",
+      labelIds: [label!.id],
+      commentCount: 0,
+    });
+    const suites = await list(`${p}/suites`);
+    const login = suites.find((s) => s.name === "Login")!;
+    expect(login.parentId).toBe(suites.find((s) => s.name === "Smoke")!.id);
+    const [test] = await list(`${p}/tests`);
+    expect(test).toMatchObject({
+      title: "Signs in",
+      status: "not_run",
+      runCount: 0,
+      suiteId: login.id,
+      taskId: story.id,
+      steps: [{ action: "Go", expected: "Ok" }],
+    });
+    const plans = await list(`${p}/plans`);
+    expect(plans).toEqual([expect.objectContaining({ name: "Release 1", closedAt: null })]);
+    const plan = (await agent.get(`/api/plans/${plans[0]!.id}`).expect(200)).body;
+    expect(plan.items.map((i: { testCaseId: string }) => i.testCaseId)).toEqual([test!.id]);
+
+    // One activity entry for the project, naming the template.
+    const activity = (await agent.get(`${p}/activity`).expect(200)).body.items as { entity: string; diff: Record<string, unknown> }[];
+    expect(activity.filter((a) => a.entity === "task")).toEqual([]);
+    expect(activity.find((a) => a.entity === "project")!.diff.template).toEqual({ from: null, to: "Release kit" });
+
+    // The source project is untouched and a blank project still gets the default columns.
+    expect(await list(`/api/projects/${projectId}/tasks`)).toHaveLength(2);
+    const blank = (await agent.post("/api/projects").send({ name: "Blank" }).expect(201)).body;
+    expect(await list(`/api/projects/${blank.id}/columns`)).toHaveLength(4);
+    expect(await list(`/api/projects/${blank.id}/tasks`)).toEqual([]);
+  });
+
+  it("is private until the owner shares it with users or everyone", async () => {
+    const { db, agent, projectId, userId } = ctx;
+    const t = (await agent.post("/api/templates").send({ projectId, name: "Mine" }).expect(201)).body;
+    const ann = await signUp(db, "Ann", "ann@x.com");
+    const bob = await signUp(db, "Bob", "bob@x.com");
+    const annId = (await ann.get("/api/auth/me")).body.id;
+
+    expect(await list("/api/templates", ann)).toEqual([]);
+    await ann.get(`/api/templates/${t.id}`).expect(404);
+    await ann.post("/api/projects").send({ name: "X", templateId: t.id }).expect(404);
+
+    await agent.patch(`/api/templates/${t.id}`).send({ sharedWith: ["nobody"] }).expect(400);
+    const shared = (await agent.patch(`/api/templates/${t.id}`).send({ sharedWith: [annId, annId, userId] }).expect(200)).body;
+    expect(shared.sharedWith).toEqual([annId]);
+    const seen = await list("/api/templates", ann);
+    expect(seen).toEqual([expect.objectContaining({ id: t.id, isOwner: false, sharedWith: [], sourceProjectId: null })]);
+    expect(seen[0]!.owner).toEqual({ id: userId, name: "Tester" });
+    await ann.post("/api/projects").send({ name: "Ann's", templateId: t.id }).expect(201);
+    await ann.patch(`/api/templates/${t.id}`).send({ name: "Hers" }).expect(403);
+    await ann.delete(`/api/templates/${t.id}`).expect(403);
+    expect(await list("/api/templates", bob)).toEqual([]);
+
+    await agent.patch(`/api/templates/${t.id}`).send({ everyone: true, sharedWith: [] }).expect(200);
+    expect((await list("/api/templates", bob)).map((x) => x.id)).toEqual([t.id]);
+    expect((await list("/api/templates", ann)).map((x) => x.id)).toEqual([t.id]);
+
+    await agent.patch(`/api/templates/${t.id}`).send({ everyone: false }).expect(200);
+    expect(await list("/api/templates", bob)).toEqual([]);
+    await agent.delete(`/api/templates/${t.id}`).expect(204);
+    expect(await list("/api/templates")).toEqual([]);
+  });
+
+  it("needs the owner role on the project it snapshots, and can be updated from a project", async () => {
+    const { db, agent, projectId } = ctx;
+    const ed = await signUp(db, "Ed", "ed@x.com");
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "ed@x.com", role: "editor" }).expect(201);
+    await ed.post("/api/templates").send({ projectId, name: "T" }).expect(403);
+    await ed.post("/api/templates").send({ projectId: "nope", name: "T" }).expect(404);
+
+    const t = (await agent.post("/api/templates").send({ projectId, name: "T" }).expect(201)).body;
+    expect(t.counts.tasks).toBe(0);
+    await agent.post(`/api/projects/${projectId}/tasks`).send({ title: "New" }).expect(201);
+    const edsOwn = (await ed.post("/api/projects").send({ name: "Ed's" }).expect(201)).body;
+    await agent.patch(`/api/templates/${t.id}`).send({ projectId: edsOwn.id }).expect(404);
+    const updated = (await agent.patch(`/api/templates/${t.id}`).send({ projectId, name: "T2" }).expect(200)).body;
+    expect(updated).toMatchObject({ name: "T2", counts: expect.objectContaining({ tasks: 1 }) });
+
+    // Deleting the source project keeps the template.
+    await agent.delete(`/api/projects/${projectId}`).expect(204);
+    expect((await agent.get(`/api/templates/${t.id}`).expect(200)).body).toMatchObject({ sourceProjectId: null });
+  });
+});
+
 describe.skipIf(onSqlite)("Postgres schema", () => {
   it("has the same tables and columns as SQLite after all migrations", async () => {
     const { DatabaseSync } = await import("node:sqlite");

@@ -10,7 +10,9 @@ import type {
   Project,
   ProjectRole,
   ProjectSummary,
+  ProjectTemplate,
   RecentComment,
+  TemplateCounts,
   Task,
   TestCase,
   TestRun,
@@ -53,7 +55,7 @@ export const jsonText = (db: DB, column: string, ...path: string[]) =>
 export const rowOrder = (db: DB, alias: string) => `${alias}.${db.dialect === "postgres" ? "seq" : "rowid"}`;
 
 /** A JSON value from the database: Postgres drivers parse json results, SQLite returns text. */
-const parseJson = <T>(v: unknown, fallback: T): T =>
+export const parseJson = <T>(v: unknown, fallback: T): T =>
   v == null ? fallback : typeof v === "string" ? (JSON.parse(v) as T) : (v as T);
 
 // ---------- Mappers ----------
@@ -74,6 +76,27 @@ export const toProject = (r: Row): Project => ({
   createdAt: r.created_at as string,
   updatedAt: r.updated_at as string,
 });
+
+/**
+ * Expects the template row plus `owner_name`. Owner-only fields (who it's shared
+ * with, the source project) are left empty for everyone else.
+ */
+export const toTemplate = (r: Row, viewerId: string, counts: TemplateCounts, sharedWith: string[]): ProjectTemplate => {
+  const isOwner = r.owner_id === viewerId;
+  return {
+    id: r.id as string,
+    name: r.name as string,
+    description: r.description as string,
+    owner: { id: r.owner_id as string, name: r.owner_name as string },
+    isOwner,
+    everyone: Boolean(r.everyone),
+    sharedWith: isOwner ? sharedWith : [],
+    sourceProjectId: isOwner ? ((r.source_project_id as string | null) ?? null) : null,
+    counts,
+    createdAt: r.created_at as string,
+    updatedAt: r.updated_at as string,
+  };
+};
 
 export const toMember = (r: Row): Member => ({
   projectId: r.project_id as string,

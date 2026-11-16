@@ -124,3 +124,13 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
 5.5 **Dockerfile and deployment guide**; health check is at `/api/health`.
 5.6 **End-to-end tests** with Playwright covering sign-in, nesting, board moves, comments, tests.
 5.7 **CI**: GitHub Actions running typecheck, unit/API tests and e2e.
+5.8 ~~**Templates**~~ Done: project owners choose "Save as template" on the overview to snapshot a project's
+    structure (board columns, labels, the task tree with priorities, columns and labels, test suites, test cases
+    with steps, and open test plans; not people, dates, comments, results or files). "New project" offers
+    "Start from" a template. A template is private to the user who saved it until they share it with chosen
+    people or everyone (Templates page, in the header); others can use it but only the owner edits, updates
+    (re-saves from a project) or deletes it. The demo seed includes one shared template.
+    Follow-up: editing a template's content directly (today you edit a project and save over it), relative
+    dates (e.g. "due 2 weeks after the project starts"), and default assignees by role.
+5.9 **JIRA Integration**: Allow for tie in integration with JIRA to create new projects from a JIRA ticket.
+    Pull in the description, assignee, and comment history, as well as metadata about the ticket.

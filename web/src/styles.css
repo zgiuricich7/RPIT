@@ -167,6 +167,12 @@ main.page { padding: 20px; max-width: 1400px; margin: 0 auto; }
 
 /* ---------- Home dashboard ---------- */
 .home-link.active { border-color: var(--acc); color: var(--acc); }
+/* Templates page and dialogs */
+.template-card { cursor: default; align-content: start; }
+.template-card .md { font-size: 13px; }
+.template-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.share-box { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; margin: 0; min-width: 0; display: grid; gap: 8px; }
+.share-box legend { padding: 0 4px; font-size: 13px; font-weight: 600; }
 main.home .panel { min-width: 0; }
 .home-row { align-items: flex-start; }
 .home-sub { font-size: 12px; }

@@ -23,6 +23,7 @@ import { notificationRoutes } from "./routes/notifications.ts";
 import { projectRoutes } from "./routes/projects.ts";
 import { commentRoutes, taskRoutes } from "./routes/tasks.ts";
 import { testCaseRoutes } from "./routes/tests.ts";
+import { templateRoutes } from "./routes/templates.ts";
 
 export interface AppOptions {
   /** Serve the built web app from this folder (production). */
@@ -82,6 +83,7 @@ export function createApp(db: DB, opts: AppOptions = {}) {
   api.use("/comments", commentRoutes(db));
   api.use("/notifications", notificationRoutes(db));
   api.use("/dashboard", dashboardRoutes(db));
+  api.use("/templates", templateRoutes(db));
   api.use((_req, _res) => {
     throw new HttpError(404, "API route not found");
   });

@@ -17,6 +17,7 @@ import {
 import {
   useComments,
   useCreateProject,
+  useTemplates,
   useCreateTask,
   useCreateTest,
   useDeleteComment,
@@ -43,6 +44,7 @@ import { ActivityFeed } from "./activity.tsx";
 import { Attachments } from "./attachments.tsx";
 import { TaskTests } from "./coverage.tsx";
 import { TestRuns } from "./testRuns.tsx";
+import { templateSummary } from "./templates.tsx";
 import { SuiteOptions } from "./suites.tsx";
 import { StepsEditor, draftSteps, stepsToSave } from "./testSteps.tsx";
 import { LabelPicker } from "./labels.tsx";
@@ -698,9 +700,21 @@ function TestDialog(props: {
 
 // ---------------------------------------------------------------------------
 
-export function ProjectDialog({ project, onClose }: { project: Project | null; onClose: () => void }) {
+/** Edit a project, or create one (optionally from a template; `templateId` preselects it). */
+export function ProjectDialog({
+  project,
+  templateId: initialTemplateId = "",
+  onClose,
+}: {
+  project: Project | null;
+  templateId?: string;
+  onClose: () => void;
+}) {
   const navigate = useNavigate();
   const create = useCreateProject();
+  const templates = useTemplates({ enabled: !project }).data ?? [];
+  const [templateId, setTemplateId] = useState(initialTemplateId);
+  const template = templates.find((t) => t.id === templateId);
   const update = useUpdateProject();
   const [name, setName] = useState(project?.name ?? "");
   const [description, setDescription] = useState(project?.description ?? "");
@@ -714,7 +728,7 @@ export function ProjectDialog({ project, onClose }: { project: Project | null; o
         await update.mutateAsync({ id: project.id, name, description, notifySubtasksDone });
         onClose();
       } else {
-        const p = await create.mutateAsync({ name, description, notifySubtasksDone });
+        const p = await create.mutateAsync({ name, description, notifySubtasksDone, templateId: templateId || undefined });
         onClose();
         navigate(`/projects/${p.id}/overview`);
       }
@@ -731,6 +745,37 @@ export function ProjectDialog({ project, onClose }: { project: Project | null; o
           Name
           <input autoFocus value={name} onChange={(e) => setName(e.target.value)} required />
         </label>
+        {!project && (templates.length > 0 || initialTemplateId) && (
+          <label className="field">
+            Start from
+            <select value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+              <option value="">Blank project</option>
+              {templates.some((t) => t.isOwner) && (
+                <optgroup label="Your templates">
+                  {templates.filter((t) => t.isOwner).map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {templates.some((t) => !t.isOwner) && (
+                <optgroup label="Shared with you">
+                  {templates.filter((t) => !t.isOwner).map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} ({t.owner.name})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+            <span className="muted" style={{ fontSize: 12 }}>
+              {template
+                ? `Creates ${templateSummary(template.counts)}. Assignees, dates, comments and results aren't copied.`
+                : "Starts with the standard board columns and nothing else."}
+            </span>
+          </label>
+        )}
         <MarkdownEditor
           label="Description"
           rows={4}

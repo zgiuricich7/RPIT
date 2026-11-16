@@ -562,6 +562,30 @@ export const migrations: string[] = [
   BEFORE DELETE ON activity
   BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
   `,
+
+  /* 15: project templates */ `
+  -- A JSON snapshot of a project's structure (columns, labels, tasks, suites, test cases, open plans) that new
+  -- projects can start from. Private to its owner unless shared with chosen users (template_shares) or everyone.
+  CREATE TABLE project_templates (
+    id                TEXT PRIMARY KEY,
+    owner_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name              TEXT NOT NULL,
+    description       TEXT NOT NULL DEFAULT '',
+    everyone          INTEGER NOT NULL DEFAULT 0 CHECK (everyone IN (0, 1)),
+    content           TEXT NOT NULL,
+    source_project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX idx_templates_owner ON project_templates(owner_id);
+
+  CREATE TABLE template_shares (
+    template_id TEXT NOT NULL REFERENCES project_templates(id) ON DELETE CASCADE,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (template_id, user_id)
+  );
+  CREATE INDEX idx_template_shares_user ON template_shares(user_id);
+  `,
 ];
 
 /** Timestamps are ISO-8601 text in UTC with milliseconds, like SQLite's strftime('%Y-%m-%dT%H:%M:%fZ','now'). */
@@ -817,5 +841,27 @@ export const pgMigrations: string[] = [
   END $$;
   CREATE TRIGGER activity_no_update BEFORE UPDATE ON activity FOR EACH ROW EXECUTE FUNCTION activity_append_only();
   CREATE TRIGGER activity_no_delete BEFORE DELETE ON activity FOR EACH ROW EXECUTE FUNCTION activity_append_only();
+  `,
+
+  /* 2 (SQLite 15): project templates */ `
+  CREATE TABLE project_templates (
+    id                TEXT PRIMARY KEY,
+    owner_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name              TEXT NOT NULL,
+    description       TEXT NOT NULL DEFAULT '',
+    everyone          INTEGER NOT NULL DEFAULT 0 CHECK (everyone IN (0, 1)),
+    content           TEXT NOT NULL,
+    source_project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+    created_at        TEXT NOT NULL DEFAULT ${PG_NOW},
+    updated_at        TEXT NOT NULL DEFAULT ${PG_NOW}
+  );
+  CREATE INDEX idx_templates_owner ON project_templates(owner_id);
+
+  CREATE TABLE template_shares (
+    template_id TEXT NOT NULL REFERENCES project_templates(id) ON DELETE CASCADE,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (template_id, user_id)
+  );
+  CREATE INDEX idx_template_shares_user ON template_shares(user_id);
   `,
 ];

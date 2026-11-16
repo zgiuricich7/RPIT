@@ -87,6 +87,8 @@ export const ProjectInput = z.object({
   name: z.string().trim().min(1, "Name is required").max(120),
   description: longText.default(""),
   notifySubtasksDone: z.boolean().default(true),
+  /** Start from this project template (one you can see): its columns, labels, tasks, suites, tests and plans. */
+  templateId: id.optional(),
 });
 /**
  * Patch schemas must not carry defaults: zod still applies `.default()` inside
@@ -101,6 +103,37 @@ export const ProjectPatch = z
   .partial();
 export type ProjectInput = z.input<typeof ProjectInput>;
 export type ProjectPatch = z.infer<typeof ProjectPatch>;
+
+// ---------- Project templates ----------
+/**
+ * A template is a snapshot of a project's structure that new projects can start
+ * from: board columns, labels, the task tree (titles, descriptions, priorities,
+ * columns, labels), test suites, test cases with their steps, and open test
+ * plans. People, dates, comments, results and files aren't copied. A template
+ * belongs to the user who saved it and is private until they share it with
+ * chosen users or everyone; others can use it but not change it.
+ */
+const templateName = z.string().trim().min(1, "Name is required").max(120);
+export const TemplateInput = z.object({
+  /** Take the snapshot from this project (you must be one of its owners). */
+  projectId: id,
+  name: templateName,
+  description: longText.default(""),
+});
+export const TemplatePatch = z
+  .object({
+    name: templateName,
+    description: longText,
+    /** Visible to every user. */
+    everyone: z.boolean(),
+    /** Users it's shared with; replaces the list. */
+    sharedWith: z.array(id).max(500),
+    /** Replace the content with a new snapshot of this project (you must be one of its owners). */
+    projectId: id,
+  })
+  .partial();
+export type TemplateInput = z.input<typeof TemplateInput>;
+export type TemplatePatch = z.infer<typeof TemplatePatch>;
 
 // ---------- Members ----------
 export const MemberInput = z.object({
@@ -392,6 +425,34 @@ export interface Project {
   notifySubtasksDone: boolean;
   /** The signed-in user's role in this project. */
   role: ProjectRole;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** How much a template creates. */
+export interface TemplateCounts {
+  columns: number;
+  labels: number;
+  tasks: number;
+  suites: number;
+  tests: number;
+  plans: number;
+}
+
+export interface ProjectTemplate {
+  id: string;
+  name: string;
+  description: string;
+  owner: { id: string; name: string };
+  /** The signed-in user owns it: they can edit, share, update and delete it. */
+  isOwner: boolean;
+  /** Visible to every user. */
+  everyone: boolean;
+  /** User ids it's shared with (only filled in for the owner). */
+  sharedWith: string[];
+  /** The project it was last saved from (only for the owner; null if that project was deleted). */
+  sourceProjectId: string | null;
+  counts: TemplateCounts;
   createdAt: string;
   updatedAt: string;
 }

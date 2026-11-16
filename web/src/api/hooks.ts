@@ -22,12 +22,15 @@ import type {
   ProjectInput,
   ProjectPatch,
   ProjectSummary,
+  ProjectTemplate,
   RecentComment,
   RegisterInput,
   Task,
   TaskInput,
   TaskMove,
   TaskPatch,
+  TemplateInput,
+  TemplatePatch,
   TestCase,
   TestCaseInput,
   TestCasePatch,
@@ -71,6 +74,8 @@ export const keys = {
   comments: (taskId: string) => ["task", taskId, "comments"] as const,
   /** The home dashboard across projects; not project-scoped. */
   dashboard: (today: string) => ["dashboard", today] as const,
+  /** Project templates the user can see (their own and shared ones); not project-scoped. */
+  templates: ["templates"] as const,
   /** The signed-in user's inbox; not project-scoped. */
   notifications: ["notifications"] as const,
 };
@@ -181,6 +186,39 @@ export function useDeleteProject() {
   return useMutation({
     mutationFn: (id: string) => api<void>(`/projects/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.projects }),
+  });
+}
+
+// ---------- Project templates ----------
+
+export function useTemplates(opts: { enabled?: boolean } = {}) {
+  return useQuery({ queryKey: keys.templates, queryFn: () => api<ProjectTemplate[]>("/templates"), enabled: opts.enabled });
+}
+
+/** Save a project as a new template. */
+export function useCreateTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: TemplateInput) => api<ProjectTemplate>("/templates", { method: "POST", body: input }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.templates }),
+  });
+}
+
+/** Rename, share, or (with `projectId`) replace the content with a new snapshot. */
+export function useUpdateTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...patch }: TemplatePatch & { id: string }) =>
+      api<ProjectTemplate>(`/templates/${id}`, { method: "PATCH", body: patch }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.templates }),
+  });
+}
+
+export function useDeleteTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<void>(`/templates/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.templates }),
   });
 }
 

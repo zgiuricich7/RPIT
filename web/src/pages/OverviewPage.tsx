@@ -28,6 +28,7 @@ import {
 import { ProjectDialog, useDialogs } from "../components/dialogs.tsx";
 import { ActivityFeed } from "../components/activity.tsx";
 import { Attachments } from "../components/attachments.tsx";
+import { SaveTemplateDialog } from "../components/templates.tsx";
 import { CommentBody, MarkdownView } from "../components/markdown.tsx";
 import { DueDate, Meter, Stack, TaskStatusPill, TestStatusPill, useToday } from "../components/ui.tsx";
 import { formatDateTime } from "../lib/format.ts";
@@ -56,6 +57,7 @@ export function OverviewPage() {
   const del = useDeleteProject();
   const activity = useProjectActivity(project.id);
   const [editing, setEditing] = useState(false);
+  const [savingTemplate, setSavingTemplate] = useState(false);
   const today = useToday();
 
   const top = buildTree(tasks);
@@ -94,6 +96,9 @@ export function OverviewPage() {
           <>
             <button className="btn sm" onClick={() => setEditing(true)}>
               Edit project
+            </button>
+            <button className="btn sm" onClick={() => setSavingTemplate(true)}>
+              Save as template
             </button>
             <button className="btn sm danger" onClick={remove}>
               Delete project
@@ -248,6 +253,7 @@ export function OverviewPage() {
       </div>
 
       {editing && <ProjectDialog project={project} onClose={() => setEditing(false)} />}
+      {savingTemplate && <SaveTemplateDialog project={project} onClose={() => setSavingTemplate(false)} />}
     </>
   );
 }

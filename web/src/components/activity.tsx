@@ -41,6 +41,7 @@ const FIELD_LABELS: Record<string, string> = {
   remindAssignee: "Reminders",
   labels: "Labels",
   notifySubtasksDone: "Prompt when subtasks are done",
+  template: "Template",
   category: "Counts as",
   suiteId: "Suite",
   color: "Colour",

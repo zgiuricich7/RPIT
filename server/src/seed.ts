@@ -12,6 +12,7 @@ import { hashPassword } from "./auth.ts";
 import { addDays, toCalendarDate } from "@rpit/shared";
 import { recordCommentActivity } from "./notify.ts";
 import { createDefaultColumns } from "./columns.ts";
+import { snapshotProject } from "./templates.ts";
 
 const db = await openDatabase(config.databaseUrl);
 const run = (sql: string, ...params: Param[]) => db.run(sql, ...params);
@@ -226,6 +227,18 @@ await transaction(db, async () => {
     await run(`INSERT INTO test_plan_items (plan_id, test_case_id) VALUES (?, ?)`, plan, t);
   }
   await testRun(buttonsTest, "passed", priya, "", new Date().toISOString(), plan);
+
+  // Maya saved the project's structure as a template, shared with everyone.
+  await run(
+    `INSERT INTO project_templates (id, owner_id, name, description, everyone, content, source_project_id)
+     VALUES (?, ?, ?, ?, 1, ?, ?)`,
+    newId(),
+    maya,
+    "Website redesign",
+    "Columns, labels, tasks and test cases for a site redesign. Start a project from it and adjust.",
+    JSON.stringify(await snapshotProject(db, project)),
+    project,
+  );
 });
 
 console.log("Seeded demo data. Sign in with demo@rpit.dev / rpit-demo");

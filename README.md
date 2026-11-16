@@ -8,6 +8,9 @@ and test case tracking — with a per-project overview dashboard.
 - **Home dashboard** across all your projects: your open tasks (overdue first) and tests to run or fix, and a
   card per project with completion, overdue and upcoming work, test pass rate and open test plans
 - **Projects**, each with its own task tree, board and test cases
+- **Project templates**: save a project's structure (columns, labels, task tree, test suites, test cases and open
+  test plans) as a template and start new projects from it; templates are private until you share them with
+  chosen people or everyone
 - **Project members** with owner, editor and viewer roles; invite teammates by email
 - **Unlimited subtask nesting** with progress roll-ups (measured on tasks that have no subtasks)
 - **List view** (collapsible tree) and **Board view** (drag cards between status columns)
@@ -100,7 +103,9 @@ All routes are under `/api` and require a session except `/health` and `/auth/*`
 ```
 POST   /auth/register | /auth/login | /auth/logout     GET /auth/me
 GET    /users
-GET    /projects                 POST /projects
+GET    /projects                 POST /projects               (templateId: start from a template)
+GET    /templates                POST /templates              (save a project as a template)
+GET/PATCH/DELETE /templates/:id  (PATCH: rename, share, or re-snapshot from projectId; owner only)
 GET    /projects/:id             PATCH/DELETE /projects/:id
 GET    /projects/:id/summary     GET /projects/:id/comments/recent
 GET    /projects/:id/activity    GET /tasks/:id/activity       GET /tests/:id/activity   (?before=&limit=)

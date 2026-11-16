@@ -51,6 +51,8 @@ server/   Express 5 API on SQLite (node:sqlite, the default) or Postgres (`pg`, 
   src/events.ts       in-process EventHub: logActivity publishes a ProjectEvent after commit
   src/routes/events.ts  GET /api/projects/:id/events — server-sent event stream per project
   src/routes/dashboard.ts  GET /api/dashboard?today= — home page data across the user's projects
+  src/templates.ts    project templates: TemplateContent (zod), snapshotProject, applyTemplate
+  src/routes/templates.ts  /api/templates — list/save/share/update/delete (user-scoped, owner-only changes)
   test/db.ts          freshDb()/isolatedDb() for tests; RPIT_TEST_DB picks SQLite or PGlite (vitest.config.ts)
   test/api.test.ts    supertest against a fresh DB per test
   test/events.test.ts event stream tests (real listening server + fetch, since supertest buffers)
@@ -69,8 +71,9 @@ web/      React 19 + Vite + TanStack Query + React Router 7
   src/components/testSteps.tsx    StepsEditor: ordered action/expected rows (read-only view renders Markdown)
   src/components/suites.tsx       SuiteSidebar (tree + pass rates on the Tests page), SuiteDialog, SuiteOptions
   src/components/coverage.tsx     CoverageBadge (task list), CoveragePill, TaskTests (task dialog's Tests section)
+  src/components/templates.tsx  SaveTemplateDialog (overview), TemplateDialog (rename + share), templateSummary
   src/components/labels.tsx    LabelPicker (toggle chips + create) for the task dialog; LabelChip/TaskLabels are in ui.tsx
-  src/pages/          Home (dashboard at /), Overview, Tasks (List + Board; filters and sort in the URL), Tests, Plans (list, ?plan=<id> detail), Coverage,
+  src/pages/          Home (dashboard at /), Templates (/templates), Overview, Tasks (List + Board; filters and sort in the URL), Tests, Plans (list, ?plan=<id> detail), Coverage,
                       Labels, Members, Inbox, Auth
   src/components/TaskFilters.tsx  search box ("/" focuses it) + assignee/priority/status/label/due filter menus
   src/pages/taskViews.tsx  List and Board views with @dnd-kit drag and drop (mouse, touch, keyboard)
@@ -133,6 +136,10 @@ docs/ROADMAP.md       prioritised backlog
   goes through them. Record runs with `POST /api/tests/:id/runs`; a `status` sent to create or PATCH a test case
   (when it changes) is a shortcut that records a run. Runs may be `not_run` ("needs re-testing"). Deleting a run
   (`DELETE /api/test-runs/:id`, editors) falls back to the previous one. Test cases expose `lastRunAt`/`runCount`.
+- `project_templates(owner_id, name, description, everyone, content, source_project_id)` — saved project
+  structures. `content` is JSON text (`TemplateContent` in `server/src/templates.ts`, versioned) where rows refer to
+  each other by key; `everyone` (0/1) shares it with every user, `template_shares(template_id, user_id)` with
+  chosen ones. Cascades from the owner; `source_project_id` SET NULL. Not project-scoped and not in the activity log.
 - `assignee_id` columns reference `users` with `SET NULL`.
 - `comment_mentions(comment_id, user_id)` — who a comment @-mentioned, computed once when it's posted.
 - `notifications(user_id, actor_id, project_id, kind, task_id, test_case_id, comment_id, read_at)` — one row
@@ -203,6 +210,16 @@ docs/ROADMAP.md       prioritised backlog
 - **The home page (`/`) is a dashboard across the user's projects**, from one call: `GET /api/dashboard?today=`
   (the viewer's local date, so overdue stays the viewer's: the server only compares it). It's membership-scoped
   by its queries (no `requireProjectRole`). Signing in, the brand and the "Home" link all land there.
+- **Project templates are snapshots, not links.** `snapshotProject` copies columns, labels, the task tree (title,
+  description, priority, column, labels), suites, test cases (title, priority, suite, linked task, notes, steps) and
+  open plans; never people, dates, comments, runs or files. Applying one (`POST /api/projects` with `templateId`,
+  via `applyTemplate` instead of `createDefaultColumns`) gives every row a new id, drops references that don't
+  resolve, and falls back to the default columns if the template's break the Done-column rule. It's logged as
+  the project's one "created" entry with `template` in the diff, not per row. Saving (or re-saving with `PATCH
+  projectId`) needs the owner role on the project; `/api/templates` is user-scoped (owned, shared with you, or
+  everyone; others get 404), and only the template's owner changes, shares or deletes it (403). When you add a
+  new kind of project content or a field that should carry over, add it to `TemplateContent`, both functions and
+  the template test; keep old content parseable (make new fields optional, or bump `version`).
 - **Progress = leaf tasks done / leaf tasks** (tasks with no children). Use `leafProgress` from shared;
   the server's `projectSummary` uses the same function, so overview numbers match the UI.
 - **Cache invalidation:** task/test/comment mutations invalidate `["project", projectId]`, which covers

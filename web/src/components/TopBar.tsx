@@ -20,6 +20,9 @@ export function TopBar({ projectId }: { projectId?: string }) {
       <NavLink to="/" end className="btn sm home-link">
         Home
       </NavLink>
+      <NavLink to="/templates" className="btn sm home-link">
+        Templates
+      </NavLink>
       <select
         aria-label="Project"
         value={projectId ?? ""}
