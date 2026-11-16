@@ -299,6 +299,19 @@ export type TestSuiteInput = z.input<typeof TestSuiteInput>;
 export type TestSuitePatch = z.infer<typeof TestSuitePatch>;
 
 // ---------- Test cases ----------
+/**
+ * One step of a test case: what to do and what should happen (both Markdown).
+ * A step needs at least one of the two: clients drop blank rows before saving,
+ * and the server rejects any that are left.
+ */
+export const TestStepInput = z
+  .object({
+    action: z.string().trim().max(5_000).default(""),
+    expected: z.string().trim().max(5_000).default(""),
+  })
+  .refine((s) => s.action || s.expected, { message: "A step needs an action or an expected result", path: ["action"] });
+/** The whole ordered list; sending it replaces the test's steps. */
+const testSteps = z.array(TestStepInput).max(100, "Keep a test case to 100 steps");
 export const TestCaseInput = z.object({
   title,
   suiteId: nullableId.default(null),
@@ -306,8 +319,7 @@ export const TestCaseInput = z.object({
   priority: Priority.default("medium"),
   assigneeId: nullableId.default(null),
   taskId: nullableId.default(null),
-  steps: longText.default(""),
-  expected: longText.default(""),
+  steps: testSteps.default([]),
   notes: longText.default(""),
 });
 export const TestCasePatch = z
@@ -318,8 +330,7 @@ export const TestCasePatch = z
     priority: Priority,
     assigneeId: nullableId,
     taskId: nullableId,
-    steps: longText,
-    expected: longText,
+    steps: testSteps,
     notes: longText,
   })
   .partial();
@@ -457,14 +468,38 @@ export interface TestCase {
   status: TestStatus;
   priority: Priority;
   assigneeId: string | null;
-  steps: string;
-  expected: string;
+  /** Ordered steps, each with its expected result. */
+  steps: TestStep[];
   notes: string;
   /** When the latest run was recorded; null if it has never been run. */
   lastRunAt: string | null;
   runCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TestStep {
+  /** Markdown. */
+  action: string;
+  /** Markdown; may be empty. */
+  expected: string;
+}
+
+/**
+ * Steps as one Markdown numbered list, for the activity log and anywhere a
+ * single block of text is needed:
+ *   1. Open the page
+ *      Expected: it loads
+ */
+export function stepsToText(steps: TestStep[]): string {
+  return steps
+    .map((s, i) => {
+      const indent = " ".repeat(String(i + 1).length + 2);
+      const action = (s.action || "(no action)").replace(/\n/g, `\n${indent}`);
+      const expected = s.expected ? `\n${indent}Expected: ${s.expected.replace(/\n/g, `\n${indent}`)}` : "";
+      return `${i + 1}. ${action}${expected}`;
+    })
+    .join("\n");
 }
 
 /** A folder of test cases, possibly inside another suite. */

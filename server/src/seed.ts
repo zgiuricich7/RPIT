@@ -115,17 +115,36 @@ transaction(db, () => {
   recordCommentActivity(db, { commentId: mentionId, taskId: id("buttons"), projectId: project, authorId: priya, body: mentionBody });
 
   const insertTest = db.prepare(
-    `INSERT INTO test_cases (id, project_id, task_id, title, status, priority, assignee_id, steps, expected, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO test_cases (id, project_id, task_id, title, status, priority, assignee_id, notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const buttonsTest = newId();
   const tableTest = newId();
   insertTest.run(buttonsTest, project, id("buttons"), "Buttons render in all states", "passed", "medium", priya,
-    "1. Open the component page\n2. Cycle through hover, focus, disabled", "Each state is visually distinct", "Checked in Chrome and Safari.");
+    "Checked in Chrome and Safari.");
   insertTest.run(tableTest, project, id("table"), "Table sorts by column", "failed", "high", priya,
-    "1. Click the Name header", "Rows sort A to Z", "Sort order reverses on second click.");
-  insertTest.run(newId(), project, id("content"), "Legacy URLs redirect", "not_run", "high", null,
-    "", "301 to new path", "");
+    "Sort order reverses on second click.");
+  const legacyTest = newId();
+  insertTest.run(legacyTest, project, id("content"), "Legacy URLs redirect", "not_run", "high", null, "");
+
+  // Structured steps: an action and its expected result each.
+  const insertStep = db.prepare(
+    `INSERT INTO test_steps (id, test_case_id, position, action, expected) VALUES (?, ?, ?, ?, ?)`,
+  );
+  const steps = (testId: string, list: [string, string][]) =>
+    list.forEach(([action, expected], i) => insertStep.run(newId(), testId, i + 1, action, expected));
+  steps(buttonsTest, [
+    ["Open the component page", "All button variants are listed"],
+    ["Hover over each button", "The hover colour shows"],
+    ["Tab to each button", "A visible focus ring appears"],
+    ["Check a disabled button", "It looks muted and can't be clicked"],
+  ]);
+  steps(tableTest, [
+    ["Open a table with at least 10 rows", ""],
+    ["Click the **Name** header", "Rows sort A to Z"],
+    ["Click it again", "Rows sort Z to A"],
+  ]);
+  steps(legacyTest, [["Visit an old URL such as `/about-us.html`", "301 redirect to the new path"]]);
 
   // Suites: Components (with a nested Data display suite) and Content migration.
   const insertSuite = db.prepare(`INSERT INTO test_suites (id, project_id, parent_id, name, description) VALUES (?, ?, ?, ?, ?)`);

@@ -50,7 +50,7 @@ const FIELD_LABELS: Record<string, string> = {
   role: "Role",
   body: "Comment",
 };
-/** Shown as "changed" with the full before/after behind a disclosure. */
+/** Shown as "changed" with the full before/after behind a disclosure. (`expected` is from before structured steps.) */
 const LONG_TEXT = new Set(["description", "steps", "expected", "notes", "body"]);
 
 interface Lookup {

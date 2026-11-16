@@ -155,8 +155,7 @@ export const toTestCase = (r: Row): TestCase => ({
   status: r.status as TestCase["status"],
   priority: r.priority as TestCase["priority"],
   assigneeId: (r.assignee_id as string | null) ?? null,
-  steps: r.steps as string,
-  expected: r.expected as string,
+  steps: r.steps_json ? (JSON.parse(r.steps_json as string) as TestCase["steps"]) : [],
   notes: r.notes as string,
   lastRunAt: (r.last_run_at as string | null) ?? null,
   runCount: Number(r.run_count ?? 0),
@@ -164,9 +163,11 @@ export const toTestCase = (r: Row): TestCase => ({
   updatedAt: r.updated_at as string,
 });
 
-/** Test cases with when they were last run and how often; alias test_cases as tc. */
+/** Test cases with their steps (JSON, in order), when they were last run and how often; alias test_cases as tc. */
 export const TEST_SELECT = `
   SELECT tc.*,
+    (SELECT json_group_array(json_object('action', action, 'expected', expected)) FROM (
+       SELECT s.action, s.expected FROM test_steps s WHERE s.test_case_id = tc.id ORDER BY s.position)) AS steps_json,
     (SELECT MAX(r.created_at) FROM test_runs r WHERE r.test_case_id = tc.id) AS last_run_at,
     (SELECT COUNT(*) FROM test_runs r WHERE r.test_case_id = tc.id) AS run_count
   FROM test_cases tc`;

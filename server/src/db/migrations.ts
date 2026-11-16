@@ -477,4 +477,26 @@ export const migrations: string[] = [
   BEFORE DELETE ON activity
   BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
   `,
+
+  /* 13: structured test steps (ordered action + expected result) */ `
+  CREATE TABLE test_steps (
+    id           TEXT PRIMARY KEY,
+    test_case_id TEXT NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
+    position     INTEGER NOT NULL,
+    action       TEXT NOT NULL DEFAULT '',
+    expected     TEXT NOT NULL DEFAULT '',
+    UNIQUE (test_case_id, position)
+  );
+
+  -- The old free text becomes one step per test (its Markdown, e.g. a numbered list, still renders),
+  -- so nothing is lost; people can split it into steps when they next edit the test.
+  INSERT INTO test_steps (id, test_case_id, position, action, expected)
+  SELECT lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-'
+           || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))),
+         id, 1, trim(steps), trim(expected)
+  FROM test_cases WHERE trim(steps) != '' OR trim(expected) != '';
+
+  ALTER TABLE test_cases DROP COLUMN steps;
+  ALTER TABLE test_cases DROP COLUMN expected;
+  `,
 ];

@@ -61,6 +61,7 @@ web/      React 19 + Vite + TanStack Query + React Router 7
   src/components/attachments.tsx  Attachments: file list + upload/drop for a task, test case or the project
   src/components/columns.tsx      ColumnsDialog: owners add/rename/recategorise/reorder/delete board columns
   src/components/testRuns.tsx     TestRuns: run timeline + "Record run" form in the test dialog
+  src/components/testSteps.tsx    StepsEditor: ordered action/expected rows (read-only view renders Markdown)
   src/components/suites.tsx       SuiteSidebar (tree + pass rates on the Tests page), SuiteDialog, SuiteOptions
   src/components/labels.tsx    LabelPicker (toggle chips + create) for the task dialog; LabelChip/TaskLabels are in ui.tsx
   src/pages/          Overview, Tasks (List + Board; filters and sort in the URL), Tests, Labels, Members, Inbox, Auth
@@ -106,6 +107,11 @@ docs/ROADMAP.md       prioritised backlog
   per suite include sub-suites and are computed client-side with `suiteStats` (same definition as the project
   summary: passed / run, excluding not run). The Tests page keeps the selected suite in `?suite=<id>|none`, and a
   new test case defaults to it. Editors manage suites; siblings are ordered by name.
+- `test_steps(test_case_id, position, action, expected)` — a test case's ordered steps (cascade; unique position).
+  The API exposes `steps: { action, expected }[]` on TestCase; sending `steps` replaces the whole list
+  (`setTestSteps`), leaving it out keeps it. A step needs an action or an expected result. The log records steps
+  as one numbered Markdown list (`stepsToText`, via `auditedTest`). Steps are Markdown but edited in plain
+  auto-growing textareas (a toolbar per field would be too heavy); they render with `MarkdownView`.
 - `test_runs(test_case_id, status, run_by, notes, created_at)` — run history (cascades from the test case,
   `run_by` SET NULL). **`test_cases.status` is a cache of the newest run's status** (`not_run` with no runs),
   maintained by `recordTestRun` / `syncTestStatus` in `server/src/routes/tests.ts`; every write to `test_runs`
@@ -162,7 +168,7 @@ docs/ROADMAP.md       prioritised backlog
 - **Cache invalidation:** task/test/comment mutations invalidate `["project", projectId]`, which covers
   tasks, tests, summary and recent comments. New project-scoped queries should live under that prefix.
 - **Dialogs are URL state.** Open with `useDialogs().openTask(id)` / `newTask(parentId)` etc., not local state.
-- **Free text is Markdown** (comments, task/project descriptions, test steps/expected/notes). Edit with
+- **Free text is Markdown** (comments, task/project descriptions, test steps and their expected results, notes). Edit with
   `MarkdownEditor`, display with `MarkdownView`; never render user text with `dangerouslySetInnerHTML`.
   Rendering is GitHub-flavoured, ignores raw HTML, and shows images as links (no third-party loads). Use
   `markdownToPlainText` for one-line previews. Stored text is the raw Markdown; the server doesn't parse it.

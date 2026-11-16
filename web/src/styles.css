@@ -149,6 +149,22 @@ main.page { padding: 20px; max-width: 1400px; margin: 0 auto; }
   border: 1px solid color-mix(in srgb, var(--done) 45%, transparent); border-radius: var(--radius);
   background: color-mix(in srgb, var(--done) 8%, transparent);
 }
+/* ---------- Test steps ---------- */
+.steps-edit { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.steps-edit li { display: grid; grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1fr) auto; gap: 6px; align-items: start; }
+.steps-edit textarea { resize: none; overflow: hidden; min-height: 34px; color: var(--ink); }
+.step-num { font-weight: 600; color: var(--mute); text-align: right; padding-top: 8px; }
+.step-tools { display: inline-flex; gap: 4px; padding-top: 4px; }
+.step-hint { font-size: 12px; }
+.steps-view { margin: 0; padding-left: 22px; display: grid; gap: 8px; color: var(--ink); }
+.steps-view .md p { margin: 0; }
+.step-expected { display: flex; gap: 8px; align-items: baseline; font-size: 13px; }
+.step-expected > span { flex: none; font-size: 12px; }
+@media (max-width: 640px) {
+  .steps-edit li { grid-template-columns: 24px minmax(0, 1fr); }
+  .steps-edit li > textarea[data-field="expected"], .steps-edit .step-tools { grid-column: 2; }
+}
+
 /* ---------- Test suites ---------- */
 .tests-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: start; }
 .tests-main { min-width: 0; }

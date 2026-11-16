@@ -42,6 +42,7 @@ import { ActivityFeed } from "./activity.tsx";
 import { Attachments } from "./attachments.tsx";
 import { TestRuns } from "./testRuns.tsx";
 import { SuiteOptions } from "./suites.tsx";
+import { StepsEditor, draftSteps, stepsToSave } from "./testSteps.tsx";
 import { LabelPicker } from "./labels.tsx";
 import { CommentBody, MarkdownEditor } from "./markdown.tsx";
 import { Modal, Options } from "./ui.tsx";
@@ -542,8 +543,8 @@ function TestDialog(props: {
     assigneeId: test?.assigneeId ?? "",
     taskId: test?.taskId ?? "",
     suiteId: test?.suiteId ?? (props.defaultSuiteId && suites.some((s) => s.id === props.defaultSuiteId) ? props.defaultSuiteId : ""),
-    steps: test?.steps ?? "",
-    expected: test?.expected ?? "",
+    // A new test starts with one empty step to fill in.
+    steps: draftSteps(test?.steps ?? [{ action: "", expected: "" }]),
     notes: test?.notes ?? "",
   });
   const [error, setError] = useState<string | null>(null);
@@ -552,7 +553,13 @@ function TestDialog(props: {
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    const body = { ...form, assigneeId: form.assigneeId || null, taskId: form.taskId || null, suiteId: form.suiteId || null };
+    const body = {
+      ...form,
+      steps: stepsToSave(form.steps),
+      assigneeId: form.assigneeId || null,
+      taskId: form.taskId || null,
+      suiteId: form.suiteId || null,
+    };
     try {
       // An existing test's status changes only by recording a run (see Runs below).
       if (test) await update.mutateAsync({ id: test.id, ...body, status: undefined });
@@ -621,23 +628,7 @@ function TestDialog(props: {
               </select>
             </label>
           </div>
-          <MarkdownEditor
-            label="Steps"
-            rows={4}
-            value={form.steps}
-            onValueChange={(v) => set("steps", v)}
-            readOnly={!canEdit}
-            maxLength={20_000}
-            placeholder={"1. Open the page\n2. Click the button"}
-          />
-          <MarkdownEditor
-            label="Expected result"
-            rows={2}
-            value={form.expected}
-            onValueChange={(v) => set("expected", v)}
-            readOnly={!canEdit}
-            maxLength={20_000}
-          />
+          <StepsEditor steps={form.steps} onChange={(steps) => set("steps", steps)} readOnly={!canEdit} />
           <MarkdownEditor
             label="Notes and documentation"
             rows={3}

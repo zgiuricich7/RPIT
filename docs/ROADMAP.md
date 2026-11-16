@@ -78,7 +78,12 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
     in `?suite=`). Tests are filed from the test dialog; new tests default to the selected suite. Deleting a suite
     moves its tests and sub-suites up a level; nothing is deleted. All changes are audited and live-updated.
     Follow-up: drag tests between suites, bulk move, manual suite ordering, and suite pass rates on the overview.
-3.3 **Structured steps** (ordered step + expected result per step) instead of free text.
+3.3 ~~**Structured steps**~~ Done: test cases have an ordered list of steps, each an action and its expected
+    result (Markdown), edited in the test dialog (add, remove, reorder with buttons or Alt+↑/↓; Enter on the last
+    expected result adds a step). Existing free-text steps and expected results became one step per test, so
+    nothing was lost. Step changes are logged as a numbered list.
+    Follow-up: record a result per step in a run (and which step failed), copy steps from another test, and
+    shared steps reused across tests.
 3.4 **Test plans / cycles**: a named set of tests to execute for a release, with progress.
 3.5 **Coverage view**: tasks with no linked tests, and roll-up of test status onto tasks.
 3.6 **Import results** from CI (JUnit XML) via an API token.

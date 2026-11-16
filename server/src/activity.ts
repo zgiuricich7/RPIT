@@ -1,4 +1,4 @@
-import type { ActivityAction, ActivityEntity, FieldChange, Task } from "@rpit/shared";
+import { stepsToText, type ActivityAction, type ActivityEntity, type FieldChange, type Task, type TestCase } from "@rpit/shared";
 import type { DB } from "./db/index.ts";
 import { newId } from "./db/index.ts";
 import { publishEvent } from "./events.ts";
@@ -47,8 +47,16 @@ export const TASK_FIELDS = [
   "remindAssignee",
   "labels",
 ] as const;
+/**
+ * A test case as the log sees it: `steps` as one numbered Markdown list (see
+ * stepsToText), so a change shows as before/after text. Entries from before
+ * structured steps have separate `steps` and `expected` text.
+ */
+export type AuditedTest = Omit<TestCase, "steps"> & { steps: string };
+export const auditedTest = (t: TestCase): AuditedTest => ({ ...t, steps: stepsToText(t.steps) });
+
 /** No `status`: it changes only through test runs, which have their own entries (entity `test_run`). */
-export const TEST_FIELDS = ["title", "suiteId", "priority", "assigneeId", "taskId", "steps", "expected", "notes"] as const;
+export const TEST_FIELDS = ["title", "suiteId", "priority", "assigneeId", "taskId", "steps", "notes"] as const;
 export const SUITE_FIELDS = ["name", "description", "parentId"] as const;
 export const TEST_RUN_FIELDS = ["status", "notes", "testCaseId"] as const;
 export const PROJECT_FIELDS = ["name", "description", "notifySubtasksDone"] as const;

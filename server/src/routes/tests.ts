@@ -7,7 +7,7 @@ import { HttpError, notFound, param, parseBody } from "../http.ts";
 import { currentUser } from "../auth.ts";
 import { byTestCase, requireProjectRole, type ProjectResolver } from "../access.ts";
 import { notifyAssignment } from "../notify.ts";
-import { changes, logActivity, snapshot, TEST_FIELDS } from "../activity.ts";
+import { auditedTest, changes, logActivity, snapshot, TEST_FIELDS } from "../activity.ts";
 import { activityPage } from "./activity.ts";
 import { checkAssignee } from "./tasks.ts";
 import { checkSuite } from "./suites.ts";
@@ -68,6 +68,13 @@ export function recordTestRun(
   return id;
 }
 
+/** Replaces a test case's steps with this ordered list. Call inside the write's transaction. */
+function setTestSteps(db: DB, testCaseId: string, steps: { action: string; expected: string }[]) {
+  db.prepare(`DELETE FROM test_steps WHERE test_case_id = ?`).run(testCaseId);
+  const add = db.prepare(`INSERT INTO test_steps (id, test_case_id, position, action, expected) VALUES (?, ?, ?, ?, ?)`);
+  steps.forEach((s, i) => add.run(newId(), testCaseId, i + 1, s.action, s.expected));
+}
+
 const testEntry = (t: TestCase) => ({
   projectId: t.projectId,
   entity: "test_case" as const,
@@ -110,8 +117,8 @@ export function testCaseRoutes(db: DB) {
     const id = newId();
     const created = transaction(db, () => {
       db.prepare(
-        `INSERT INTO test_cases (id, project_id, task_id, suite_id, title, status, priority, assignee_id, steps, expected, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO test_cases (id, project_id, task_id, suite_id, title, status, priority, assignee_id, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         projectId,
@@ -121,12 +128,11 @@ export function testCaseRoutes(db: DB) {
         "not_run",
         input.priority,
         input.assigneeId,
-        input.steps,
-        input.expected,
         input.notes,
       );
+      setTestSteps(db, id, input.steps);
       let t = get(id);
-      logActivity(db, { ...testEntry(t), actorId, action: "created", diff: snapshot(t, TEST_FIELDS, "created") });
+      logActivity(db, { ...testEntry(t), actorId, action: "created", diff: snapshot(auditedTest(t), TEST_FIELDS, "created") });
       // Created with a result: that's its first run.
       if (input.status !== "not_run") {
         recordTestRun(db, t, { status: input.status, notes: "" }, actorId);
@@ -168,10 +174,11 @@ export function testCaseRoutes(db: DB) {
     const updated = transaction(db, () => {
       db.prepare(
         `UPDATE test_cases SET task_id = ?, suite_id = ?, title = ?, priority = ?, assignee_id = ?,
-           steps = ?, expected = ?, notes = ?, updated_at = ? WHERE id = ?`,
-      ).run(m.taskId, m.suiteId, m.title, m.priority, m.assigneeId, m.steps, m.expected, m.notes, now(), id);
+           notes = ?, updated_at = ? WHERE id = ?`,
+      ).run(m.taskId, m.suiteId, m.title, m.priority, m.assigneeId, m.notes, now(), id);
+      if (p.steps) setTestSteps(db, id, p.steps);
       let t = get(id);
-      logActivity(db, { ...testEntry(t), actorId, action: "updated", diff: changes(cur, t, TEST_FIELDS) });
+      logActivity(db, { ...testEntry(t), actorId, action: "updated", diff: changes(auditedTest(cur), auditedTest(t), TEST_FIELDS) });
       // Shortcut (e.g. the result picker in the list): a changed status is recorded as a run.
       if (p.status !== undefined && p.status !== cur.status) {
         recordTestRun(db, t, { status: p.status, notes: "" }, actorId);
@@ -187,7 +194,7 @@ export function testCaseRoutes(db: DB) {
     const t = get(param(req, "testId"));
     const actorId = currentUser(req).id;
     transaction(db, () => {
-      logActivity(db, { ...testEntry(t), actorId, action: "deleted", diff: snapshot(t, TEST_FIELDS, "deleted") });
+      logActivity(db, { ...testEntry(t), actorId, action: "deleted", diff: snapshot(auditedTest(t), TEST_FIELDS, "deleted") });
       removeFilesAfterCommit(db, attachmentIds(db, "test_case_id = ?", [t.id]));
       db.prepare(`DELETE FROM test_cases WHERE id = ?`).run(t.id); // cascades to its attachments
     });

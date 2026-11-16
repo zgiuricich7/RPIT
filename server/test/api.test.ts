@@ -565,9 +565,9 @@ describe("partial updates", () => {
 
     const tc = (await agent
       .post(`/api/projects/${projectId}/tests`)
-      .send({ title: "T", taskId: t.id, assigneeId: userId, steps: "S", notes: "N" })).body;
+      .send({ title: "T", taskId: t.id, assigneeId: userId, steps: [{ action: "S", expected: "E" }], notes: "N" })).body;
     const ran = (await agent.patch(`/api/tests/${tc.id}`).send({ status: "passed" }).expect(200)).body;
-    expect(ran).toMatchObject({ status: "passed", taskId: t.id, assigneeId: userId, steps: "S", notes: "N" });
+    expect(ran).toMatchObject({ status: "passed", taskId: t.id, assigneeId: userId, steps: [{ action: "S", expected: "E" }], notes: "N" });
 
     await agent.patch(`/api/projects/${projectId}`).send({ description: "About" }).expect(200);
     const p = (await agent.patch(`/api/projects/${projectId}`).send({ name: "New" }).expect(200)).body;
@@ -1537,5 +1537,76 @@ describe("test suites", () => {
     await mkTest({ suiteId: s.id });
     await ctx.agent.delete(`/api/projects/${ctx.projectId}`).expect(204);
     expect(ctx.db.prepare(`SELECT COUNT(*) AS n FROM test_suites`).get()).toEqual({ n: 0 });
+  });
+});
+
+describe("structured test steps", () => {
+  const mkTest = (body: Record<string, unknown>) =>
+    ctx.agent.post(`/api/projects/${ctx.projectId}/tests`).send({ title: "T", ...body });
+
+  it("stores ordered steps, replaces them on update and leaves them alone otherwise", async () => {
+    const tc = (await mkTest({
+      steps: [
+        { action: "Open the page", expected: "It loads" },
+        { action: "  Click **Save**  " },
+        { expected: "A toast appears" },
+      ],
+    }).expect(201)).body;
+    expect(tc.steps).toEqual([
+      { action: "Open the page", expected: "It loads" },
+      { action: "Click **Save**", expected: "" },
+      { action: "", expected: "A toast appears" },
+    ]);
+
+    await ctx.agent.patch(`/api/tests/${tc.id}`).send({ title: "T2" }).expect(200);
+    expect((await ctx.agent.get(`/api/tests/${tc.id}`)).body.steps).toHaveLength(3);
+
+    const res = await ctx.agent
+      .patch(`/api/tests/${tc.id}`)
+      .send({ steps: [{ action: "Click **Save**" }, { action: "Open the page", expected: "It loads" }] })
+      .expect(200);
+    expect(res.body.steps.map((s: { action: string }) => s.action)).toEqual(["Click **Save**", "Open the page"]);
+    expect((await ctx.agent.patch(`/api/tests/${tc.id}`).send({ steps: [] }).expect(200)).body.steps).toEqual([]);
+    expect(ctx.db.prepare(`SELECT COUNT(*) AS n FROM test_steps`).get()).toEqual({ n: 0 });
+  });
+
+  it("rejects blank steps and too many", async () => {
+    await mkTest({ steps: [{ action: " ", expected: "" }] }).expect(400);
+    await mkTest({ steps: "1. Old style text" }).expect(400);
+    await mkTest({ steps: Array.from({ length: 101 }, (_, i) => ({ action: `Step ${i}` })) }).expect(400);
+  });
+
+  it("logs step changes as a numbered list", async () => {
+    const tc = (await mkTest({ steps: [{ action: "Open", expected: "Loads" }] })).body;
+    await ctx.agent.patch(`/api/tests/${tc.id}`).send({ steps: [{ action: "Open", expected: "Loads" }] }).expect(200); // same: not logged
+    await ctx.agent.patch(`/api/tests/${tc.id}`).send({ steps: [{ action: "Open", expected: "Loads" }, { action: "Close" }] }).expect(200);
+    const items = (await ctx.agent.get(`/api/tests/${tc.id}/activity`)).body.items;
+    expect(items).toHaveLength(2);
+    expect(items[0].diff).toEqual({ steps: { from: "1. Open\n   Expected: Loads", to: "1. Open\n   Expected: Loads\n2. Close" } });
+    await ctx.agent.delete(`/api/tests/${tc.id}`).expect(204);
+    expect(ctx.db.prepare(`SELECT COUNT(*) AS n FROM test_steps`).get()).toEqual({ n: 0 });
+  });
+});
+
+describe("migration 13 (structured steps)", () => {
+  it("turns each test's old steps and expected text into one step, then drops the columns", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const { migrations } = await import("../src/db/migrations.ts");
+    const { migrate } = await import("../src/db/index.ts");
+    const db = new DatabaseSync(":memory:");
+    db.exec("PRAGMA foreign_keys = ON");
+    for (const m of migrations.slice(0, 12)) db.exec(m);
+    db.exec("PRAGMA user_version = 12");
+    db.exec(`INSERT INTO projects (id, name) VALUES ('p', 'P')`);
+    db.exec(`INSERT INTO test_cases (id, project_id, title, steps, expected) VALUES
+      ('a', 'p', 'A', '1. Open\n2. Click', ' Works '), ('b', 'p', 'B', '', 'Only expected'), ('c', 'p', 'C', '  ', '')`);
+    migrate(db);
+    expect(db.prepare(`SELECT test_case_id, position, action, expected FROM test_steps ORDER BY test_case_id`).all()).toEqual([
+      { test_case_id: "a", position: 1, action: "1. Open\n2. Click", expected: "Works" },
+      { test_case_id: "b", position: 1, action: "", expected: "Only expected" },
+    ]);
+    const cols = (db.prepare(`PRAGMA table_info(test_cases)`).all() as { name: string }[]).map((c) => c.name);
+    expect(cols).not.toContain("steps");
+    expect(cols).not.toContain("expected");
   });
 });
