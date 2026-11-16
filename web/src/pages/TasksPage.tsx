@@ -12,7 +12,7 @@ import {
   type Project,
   type TaskFilter,
 } from "@rpit/shared";
-import { useMe, useMembers, useTasks, useUsers } from "../api/hooks.ts";
+import { useLabels, useMe, useMembers, useTasks, useUsers } from "../api/hooks.ts";
 import { useDialogs } from "../components/dialogs.tsx";
 import { TaskFilters } from "../components/TaskFilters.tsx";
 import { useToday } from "../components/ui.tsx";
@@ -28,6 +28,7 @@ export function TasksPage() {
   const tasks = useTasks(project.id);
   const users = useUsers().data;
   const members = useMembers(project.id).data ?? [];
+  const labels = useLabels(project.id).data ?? [];
   const meId = useMe().data?.id ?? null;
   const dialogs = useDialogs();
   const canEdit = hasRole(project.role, "editor");
@@ -43,6 +44,7 @@ export function TasksPage() {
     filtered: activeFilterCount(filter) > 0,
     sort: pick(sp.get("sort"), TASK_SORTS, "manual"),
     today,
+    labels,
   };
   const shown = useMemo(() => (tasks.data ?? []).filter(matches).length, [tasks.data, matches]);
 
@@ -101,6 +103,7 @@ export function TasksPage() {
           filter={filter}
           onChange={setFilter}
           members={members}
+          labels={labels}
           meId={meId}
           shown={shown}
           total={tasks.data.length}

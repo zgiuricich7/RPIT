@@ -2,6 +2,7 @@ import type {
   Activity,
   Comment,
   CommentMention,
+  Label,
   Member,
   Notification,
   Project,
@@ -59,10 +60,19 @@ export const toTask = (r: Row): Task => ({
   startDate: (r.start_date as string | null) ?? null,
   dueDate: (r.due_date as string | null) ?? null,
   remindAssignee: Boolean(r.remind_assignee),
+  labelIds: r.label_ids ? (JSON.parse(r.label_ids as string) as string[]) : [],
   position: r.position as number,
   commentCount: Number(r.comment_count ?? 0),
   createdAt: r.created_at as string,
   updatedAt: r.updated_at as string,
+});
+
+export const toLabel = (r: Row): Label => ({
+  id: r.id as string,
+  projectId: r.project_id as string,
+  name: r.name as string,
+  color: r.color as Label["color"],
+  createdAt: r.created_at as string,
 });
 
 export const toComment = (r: Row): Comment => ({
@@ -127,8 +137,12 @@ export const toTestCase = (r: Row): TestCase => ({
   updatedAt: r.updated_at as string,
 });
 
+/** Tasks with their comment count and label ids (as JSON, in label name order). */
 export const TASK_SELECT = `
-  SELECT t.*, (SELECT COUNT(*) FROM comments c WHERE c.task_id = t.id) AS comment_count
+  SELECT t.*, (SELECT COUNT(*) FROM comments c WHERE c.task_id = t.id) AS comment_count,
+    (SELECT json_group_array(label_id) FROM (
+       SELECT tl.label_id FROM task_labels tl JOIN labels l ON l.id = tl.label_id
+       WHERE tl.task_id = t.id ORDER BY l.name COLLATE NOCASE, l.id)) AS label_ids
   FROM tasks t`;
 
 /** Comment columns plus author name and mentions (as JSON); alias comments as c and the author as u. */
@@ -183,6 +197,12 @@ export function getMember(db: DB, projectId: string, userId: string): Member | u
     | Row
     | undefined;
   return row && toMember(row);
+}
+
+export function listLabels(db: DB, projectId: string): Label[] {
+  return (
+    db.prepare(`SELECT * FROM labels WHERE project_id = ? ORDER BY name COLLATE NOCASE, id`).all(projectId) as Row[]
+  ).map(toLabel);
 }
 
 export function getTask(db: DB, id: string): Task | undefined {

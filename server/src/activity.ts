@@ -1,4 +1,4 @@
-import type { ActivityAction, ActivityEntity, FieldChange } from "@rpit/shared";
+import type { ActivityAction, ActivityEntity, FieldChange, Task } from "@rpit/shared";
 import type { DB } from "./db/index.ts";
 import { newId } from "./db/index.ts";
 import { publishEvent } from "./events.ts";
@@ -16,6 +16,21 @@ import { publishEvent } from "./events.ts";
 type Value = FieldChange["from"];
 type Fields<T> = readonly (keyof T & string)[];
 
+/**
+ * A task as the log sees it: `labels` is the label names ("Bug, Frontend", or
+ * null for none) rather than ids, so entries keep the names as they were.
+ */
+export type AuditedTask = Task & { labels: string | null };
+export function auditedTask(db: DB, t: Task): AuditedTask {
+  const names = db
+    .prepare(
+      `SELECT l.name FROM task_labels tl JOIN labels l ON l.id = tl.label_id
+       WHERE tl.task_id = ? ORDER BY l.name COLLATE NOCASE, l.id`,
+    )
+    .all(t.id) as { name: string }[];
+  return { ...t, labels: names.length ? names.map((n) => n.name).join(", ") : null };
+}
+
 /** Tracked fields per entity. Internal fields (position, timestamps) are left out. */
 export const TASK_FIELDS = [
   "title",
@@ -27,9 +42,11 @@ export const TASK_FIELDS = [
   "startDate",
   "dueDate",
   "remindAssignee",
+  "labels",
 ] as const;
 export const TEST_FIELDS = ["title", "status", "priority", "assigneeId", "taskId", "steps", "expected", "notes"] as const;
 export const PROJECT_FIELDS = ["name", "description"] as const;
+export const LABEL_FIELDS = ["name", "color"] as const;
 
 const norm = (v: unknown): Value => (v === undefined ? null : (v as Value));
 

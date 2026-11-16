@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { InfiniteData, UseInfiniteQueryResult } from "@tanstack/react-query";
 import {
+  LABEL_COLOR_LABELS,
   PRIORITY_LABELS,
   PROJECT_ROLE_LABELS,
   TASK_STATUS_LABELS,
@@ -9,6 +10,7 @@ import {
   type Activity,
   type ActivityPage,
   type FieldChange,
+  type LabelColor,
   type Priority,
   type ProjectRole,
   type Task,
@@ -35,6 +37,8 @@ const FIELD_LABELS: Record<string, string> = {
   startDate: "Start date",
   dueDate: "Due date",
   remindAssignee: "Reminders",
+  labels: "Labels",
+  color: "Colour",
   taskId: "Linked task",
   steps: "Steps",
   expected: "Expected result",
@@ -57,6 +61,8 @@ function formatValue(a: Activity, field: string, v: FieldChange["from"], l: Look
   if (field === "taskId") return v ? (l.tasks.find((t) => t.id === v)?.title ?? "a deleted task") : "None";
   if (field === "startDate" || field === "dueDate") return v ? formatDate(String(v)) : "None";
   if (field === "remindAssignee") return v ? "On" : "Off";
+  if (field === "labels") return v ? String(v) : "None";
+  if (field === "color") return LABEL_COLOR_LABELS[v as LabelColor] ?? String(v);
   if (v === null || v === "") return "empty";
   if (field === "status") {
     return a.entity === "test_case" ? TEST_STATUS_LABELS[v as TestStatus] : TASK_STATUS_LABELS[v as TaskStatus];
@@ -138,6 +144,7 @@ function Sentence({ a, scope, lookup }: { a: Activity; scope: ActivityScope; loo
     case "task": {
       if (scope === "task") {
         if (a.action === "updated" && a.diff.assigneeId && Object.keys(a.diff).length === 1) return <>changed the assignee</>;
+        if (a.action === "updated" && a.diff.labels && Object.keys(a.diff).length === 1) return <>changed the labels</>;
         return <>{verb} this task</>;
       }
       const status = a.diff.status;
@@ -155,6 +162,8 @@ function Sentence({ a, scope, lookup }: { a: Activity; scope: ActivityScope; loo
     case "comment":
       if (scope === "task") return <>{{ created: "commented", updated: "edited a comment", deleted: "deleted a comment" }[a.action]}</>;
       return <>{{ created: "commented on", updated: "edited a comment on", deleted: "deleted a comment on" }[a.action]} {taskName}</>;
+    case "label":
+      return <>{verb} label <b>{a.label}</b></>;
     case "test_case":
       return scope === "test" ? <>{verb} this test case</> : <>{verb} test case {testName}</>;
   }

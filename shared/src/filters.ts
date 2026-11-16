@@ -5,7 +5,7 @@ import { PRIORITIES, TASK_STATUSES, type Priority, type Task, type TaskStatus } 
  * Task filters for the list and board, kept in the URL so a filtered view can
  * be bookmarked and shared:
  *
- *   ?q=login+bug&assignee=me,none&priority=high&status=todo,in_progress&due=overdue
+ *   ?q=login+bug&assignee=me,none&priority=high&status=todo,in_progress&label=<id>,none&due=overdue
  *
  * Within one filter the values are OR'ed (high or medium priority); different
  * filters are AND'ed. An empty list means "any". Pure functions, so the views
@@ -15,6 +15,8 @@ import { PRIORITIES, TASK_STATUSES, type Priority, type Task, type TaskStatus } 
 /** Assignee tokens besides user ids: the viewer, and tasks with nobody assigned. */
 export const ASSIGNEE_ME = "me";
 export const ASSIGNEE_NONE = "none";
+/** Label token besides label ids: tasks with no labels. */
+export const LABEL_NONE = "none";
 
 export interface TaskFilter {
   /** Free text: every word must appear in the title or description (case- and accent-insensitive). */
@@ -23,13 +25,15 @@ export interface TaskFilter {
   assignee: string[];
   priority: Priority[];
   status: TaskStatus[];
+  /** Label ids or LABEL_NONE; a task matches if it has any of them. */
+  label: string[];
   due: DueFilter;
 }
 
-export const EMPTY_TASK_FILTER: TaskFilter = { q: "", assignee: [], priority: [], status: [], due: "all" };
+export const EMPTY_TASK_FILTER: TaskFilter = { q: "", assignee: [], priority: [], status: [], label: [], due: "all" };
 
 /** URL parameter names, in the order they're written. */
-const PARAMS = ["q", "assignee", "priority", "status", "due"] as const;
+const PARAMS = ["q", "assignee", "priority", "status", "label", "due"] as const;
 
 const list = (v: string | null) =>
   v
@@ -45,6 +49,7 @@ export function parseTaskFilter(params: { get(name: string): string | null }): T
     assignee: list(params.get("assignee")).slice(0, 50),
     priority: allowed(list(params.get("priority")), PRIORITIES),
     status: allowed(list(params.get("status")), TASK_STATUSES),
+    label: list(params.get("label")).slice(0, 50),
     due: DUE_FILTERS.includes(due as DueFilter) ? (due as DueFilter) : "all",
   };
 }
@@ -61,13 +66,14 @@ export function taskFilterParams(f: TaskFilter): Record<(typeof PARAMS)[number],
     assignee: v(f.assignee.join(",")),
     priority: v(f.priority.join(",")),
     status: v(f.status.join(",")),
+    label: v(f.label.join(",")),
     due: f.due === "all" ? null : f.due,
   };
 }
 
 /** How many filters are narrowing the list (for "Clear filters" and the drag rules). */
 export function activeFilterCount(f: TaskFilter): number {
-  return [f.q.trim(), f.assignee.length, f.priority.length, f.status.length, f.due !== "all"].filter(Boolean).length;
+  return [f.q.trim(), f.assignee.length, f.priority.length, f.status.length, f.label.length, f.due !== "all"].filter(Boolean).length;
 }
 
 /** Lower-case and strip accents, so "resume" finds "Résumé". */
@@ -77,7 +83,7 @@ export const normalizeSearch = (s: string) =>
     .replace(/\p{Diacritic}/gu, "")
     .toLocaleLowerCase();
 
-type FilterableTask = Pick<Task, "title" | "description" | "assigneeId" | "priority" | "status" | "dueDate">;
+type FilterableTask = Pick<Task, "title" | "description" | "assigneeId" | "priority" | "status" | "dueDate" | "labelIds">;
 
 /**
  * Returns a predicate for one filter. `userId` resolves "me"; `today` is the
@@ -87,10 +93,13 @@ export function taskMatcher(f: TaskFilter, ctx: { today: string; userId: string 
   const words = normalizeSearch(f.q).split(/\s+/).filter(Boolean);
   const assignees = new Set(f.assignee.map((a) => (a === ASSIGNEE_ME ? (ctx.userId ?? "") : a)));
   const wantsNone = assignees.delete(ASSIGNEE_NONE);
+  const labels = new Set(f.label);
+  const wantsNoLabels = labels.delete(LABEL_NONE);
   return (t) => {
     if (f.status.length && !f.status.includes(t.status)) return false;
     if (f.priority.length && !f.priority.includes(t.priority)) return false;
     if (f.assignee.length && !(t.assigneeId ? assignees.has(t.assigneeId) : wantsNone)) return false;
+    if (f.label.length && !(t.labelIds.length ? t.labelIds.some((l) => labels.has(l)) : wantsNoLabels)) return false;
     if (!matchesDueFilter(t, f.due, ctx.today)) return false;
     if (words.length) {
       const text = normalizeSearch(`${t.title}\n${t.description}`);

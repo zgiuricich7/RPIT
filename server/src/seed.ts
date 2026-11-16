@@ -72,6 +72,18 @@ transaction(db, () => {
   dates("content", null, 14);
   for (const key of ["table", "content"]) db.prepare(`UPDATE tasks SET remind_assignee = 1 WHERE id = ?`).run(id(key));
 
+  const insertLabel = db.prepare(`INSERT INTO labels (id, project_id, name, color) VALUES (?, ?, ?, ?)`);
+  const tagTask = db.prepare(`INSERT INTO task_labels (task_id, label_id) VALUES (?, ?)`);
+  const label = (name: string, color: string, ...keys: string[]) => {
+    const labelId = newId();
+    insertLabel.run(labelId, project, name, color);
+    for (const key of keys) tagTask.run(id(key), labelId);
+  };
+  label("Design", "purple", "ds", "colors", "buttons");
+  label("Frontend", "blue", "lib", "buttons", "table");
+  label("Bug", "red", "table");
+  label("Content", "green", "content");
+
   db.prepare(`INSERT INTO comments (id, task_id, author_id, body) VALUES (?, ?, ?, ?)`).run(
     newId(), id("table"), priya, "Waiting on the sort fix from the failing test before I pick this up.",
   );

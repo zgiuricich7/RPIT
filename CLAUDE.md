@@ -34,7 +34,7 @@ server/   Express 5 API on Node's built-in SQLite (node:sqlite, no native deps)
   src/app.ts          createApp(db) — mounts all routes; used by index.ts and tests
   src/db/migrations.ts  append-only SQL migrations, tracked with PRAGMA user_version
   src/db/repo.ts      row → API mappers, shared queries, project summary
-  src/routes/*.ts     one file per resource
+  src/routes/*.ts     one file per resource (labels.ts also exports checkLabels / setTaskLabels for tasks)
   src/auth.ts         bcrypt passwords, opaque session id in an httpOnly cookie
   src/access.ts       requireProjectRole middleware + project resolvers
   src/notify.ts       creates notifications (assignments, mentions, replies) and stores comment mentions
@@ -53,8 +53,9 @@ web/      React 19 + Vite + TanStack Query + React Router 7
   src/components/mentions.tsx  @-mention autocomplete textarea (used by MarkdownEditor)
   src/components/TopBar.tsx    header with project switcher and inbox badge
   src/components/activity.tsx  ActivityFeed: renders log entries as sentences + field changes
-  src/pages/          Overview, Tasks (List + Board; filters and sort in the URL), Tests, Members, Inbox, Auth
-  src/components/TaskFilters.tsx  search box ("/" focuses it) + assignee/priority/status/due filter menus
+  src/components/labels.tsx    LabelPicker (toggle chips + create) for the task dialog; LabelChip/TaskLabels are in ui.tsx
+  src/pages/          Overview, Tasks (List + Board; filters and sort in the URL), Tests, Labels, Members, Inbox, Auth
+  src/components/TaskFilters.tsx  search box ("/" focuses it) + assignee/priority/status/label/due filter menus
   src/pages/taskViews.tsx  List and Board views with @dnd-kit drag and drop (mouse, touch, keyboard)
   src/styles.css      design tokens (light/dark) and all styles; plain CSS, no framework
 docs/ROADMAP.md       prioritised backlog
@@ -71,6 +72,11 @@ docs/ROADMAP.md       prioritised backlog
   timestamps. Start can't be after due: zod refines it when both are sent, the PATCH route checks the merged values.
   `tasks.remind_assignee` (0/1) opts a task into date reminders; `task_reminders(task_id, kind, for_date)` records
   reminders already sent so each goes out once (cascades from the task).
+- `labels(project_id, name, color)` — per-project task labels; `name` is unique per project `COLLATE NOCASE`,
+  `color` is one of `LABEL_COLORS` (CHECK + `LabelColor` zod enum; CSS classes `.lc-<color>` in styles.css).
+  `task_labels(task_id, label_id)` links them; both FKs cascade. Tasks expose `labelIds` (in label name order);
+  `TaskInput` / `TaskPatch` take `labelIds`, which replaces the set. Labels must be in the task's project.
+  Editors create, rename and delete labels.
 - `comments.task_id → tasks.id` (cascade), `comments.author_id → users.id`; `edited_at` is set when the author edits
 - `test_cases.task_id → tasks.id` (`ON DELETE SET NULL`) — deleting a task unlinks tests, never deletes them.
 - `assignee_id` columns reference `users` with `SET NULL`.
@@ -80,6 +86,7 @@ docs/ROADMAP.md       prioritised backlog
   `task_due_soon` / `task_due` (CHECK + `NotificationKind`; widening the CHECK means recreating the table).
   Cascades from the task, test case or comment it points at; removed when the recipient leaves the project.
 - `activity(project_id, actor_id, entity, entity_id, task_id, action, label, diff, created_at)` — the audit log.
+  Entities: `project` / `member` / `task` / `comment` / `test_case` / `label`.
   **No foreign keys** on project/entity/task ids so entries outlive what they describe; `label` snapshots the
   name at the time; `diff` is JSON `{ field: { from, to } }`. Triggers make it append-only (UPDATE/DELETE abort).
 - Statuses and priorities are constrained by `CHECK` in SQL **and** by zod enums in `shared`. Change both together.
@@ -108,7 +115,7 @@ docs/ROADMAP.md       prioritised backlog
   A pure reorder isn't audited (position is internal) but publishes a real-time event directly; parent and
   status changes from a move are logged as usual. Dragging is only enabled in manual order (and, in the list,
   with no due filter); a sorted board still allows moving cards between columns.
-- **Task filters live in the URL** (`?q=&assignee=me,none,<id>&priority=&status=&due=`), parsed with
+- **Task filters live in the URL** (`?q=&assignee=me,none,<id>&priority=&status=&label=<id>,none&due=`), parsed with
   `parseTaskFilter` and written with `taskFilterParams` (`shared/src/filters.ts`) so other params (view, sort,
   open dialogs) survive. Values in one filter are OR'ed, filters are AND'ed; search needs every word in the title
   or description (case/accent-insensitive). Filtering is client-side over the loaded task list; `taskMatcher`
@@ -135,8 +142,10 @@ docs/ROADMAP.md       prioritised backlog
   uses it to store mentions; the web uses it with the stored `comment.mentions` to highlight, so both agree.
 - **Every project-scoped write is audited.** Call `logActivity` from `server/src/activity.ts` inside the same
   `transaction` as the change (use `snapshot` for create/delete, `changes` for updates; empty update diffs are
-  skipped). Log side effects too (cascaded subtask deletes, unlinked tests, unassignments). New tracked fields
-  go in `TASK_FIELDS` / `TEST_FIELDS` / `PROJECT_FIELDS`, plus a label in `web/src/components/activity.tsx`.
+  skipped). Log side effects too (cascaded subtask deletes, unlinked tests, unassignments, labels removed from
+  tasks when a label is deleted). Task diffs go through `auditedTask(db, task)`, which adds `labels` as the
+  joined label names, so history keeps the names as they were. New tracked fields
+  go in `TASK_FIELDS` / `TEST_FIELDS` / `PROJECT_FIELDS` / `LABEL_FIELDS`, plus a label in `web/src/components/activity.tsx`.
   Adding an entity or action type needs a new migration that recreates the CHECK.
 - **Notifications are in-app only** (no email). Create them with `notify` / `notifyAssignment` /
   `recordCommentActivity` from `server/src/notify.ts` after a write; they skip the actor and non-members.

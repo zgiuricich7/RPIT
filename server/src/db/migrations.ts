@@ -187,4 +187,54 @@ export const migrations: string[] = [
   ALTER TABLE notifications_new RENAME TO notifications;
   CREATE INDEX idx_notifications_user ON notifications(user_id, created_at);
   `,
+
+  /* 7: task labels per project */ `
+  CREATE TABLE labels (
+    id         TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    color      TEXT NOT NULL DEFAULT 'gray'
+               CHECK (color IN ('gray','red','orange','yellow','green','teal','blue','purple','pink')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  -- Names are unique per project, ignoring case ("Bug" and "bug" are the same label).
+  CREATE UNIQUE INDEX idx_labels_name ON labels(project_id, name COLLATE NOCASE);
+
+  CREATE TABLE task_labels (
+    task_id  TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    label_id TEXT NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+    PRIMARY KEY (task_id, label_id)
+  );
+  CREATE INDEX idx_task_labels_label ON task_labels(label_id);
+
+  -- Recreate activity to widen the entity CHECK with 'label'. Copy rowid too: it's the
+  -- pagination cursor. The append-only triggers are dropped first and recreated after.
+  DROP TRIGGER activity_no_update;
+  DROP TRIGGER activity_no_delete;
+  CREATE TABLE activity_new (
+    id         TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    actor_id   TEXT REFERENCES users(id) ON DELETE SET NULL,
+    entity     TEXT NOT NULL CHECK (entity IN ('project','member','task','comment','test_case','label')),
+    entity_id  TEXT NOT NULL,
+    task_id    TEXT,
+    action     TEXT NOT NULL CHECK (action IN ('created','updated','deleted')),
+    label      TEXT NOT NULL DEFAULT '',
+    diff       TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  INSERT INTO activity_new (rowid, id, project_id, actor_id, entity, entity_id, task_id, action, label, diff, created_at)
+    SELECT rowid, id, project_id, actor_id, entity, entity_id, task_id, action, label, diff, created_at FROM activity;
+  DROP TABLE activity;
+  ALTER TABLE activity_new RENAME TO activity;
+  CREATE INDEX idx_activity_project ON activity(project_id);
+  CREATE INDEX idx_activity_task ON activity(task_id);
+  CREATE INDEX idx_activity_entity ON activity(entity, entity_id);
+  CREATE TRIGGER activity_no_update
+  BEFORE UPDATE OF id, project_id, entity, entity_id, task_id, action, label, diff, created_at ON activity
+  BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
+  CREATE TRIGGER activity_no_delete
+  BEFORE DELETE ON activity
+  BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
+  `,
 ];

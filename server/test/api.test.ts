@@ -815,3 +815,119 @@ describe("moving tasks (drag and drop)", () => {
     await viewer.post(`/api/tasks/${b.id}/move`).send({ beforeId: a.id }).expect(403);
   });
 });
+
+describe("labels", () => {
+  const mkLabel = (name: string, color?: string) =>
+    ctx.agent.post(`/api/projects/${ctx.projectId}/labels`).send({ name, color });
+  const mkTask = (body: Record<string, unknown>) => ctx.agent.post(`/api/projects/${ctx.projectId}/tasks`).send(body);
+
+  it("creates, lists (by name), renames and recolours labels; names are unique ignoring case", async () => {
+    const { agent, projectId } = ctx;
+    const bug = (await mkLabel("Bug", "red").expect(201)).body;
+    expect(bug).toMatchObject({ name: "Bug", color: "red", projectId });
+    expect((await mkLabel("  docs ").expect(201)).body).toMatchObject({ name: "docs", color: "gray" });
+    const dup = await mkLabel("bug").expect(409);
+    expect(dup.body.fieldErrors.name).toBeDefined();
+    await mkLabel("X", "magenta").expect(400);
+    await mkLabel("").expect(400);
+
+    const list = (await agent.get(`/api/projects/${projectId}/labels`).expect(200)).body;
+    expect(list.map((l: { name: string }) => l.name)).toEqual(["Bug", "docs"]);
+
+    await agent.patch(`/api/labels/${bug.id}`).send({ name: "DOCS" }).expect(409);
+    await agent.patch(`/api/labels/${bug.id}`).send({ name: "BUG" }).expect(200); // its own name in another case is fine
+    const res = await agent.patch(`/api/labels/${bug.id}`).send({ color: "blue" }).expect(200);
+    expect(res.body).toMatchObject({ name: "BUG", color: "blue" });
+  });
+
+  it("sets labels on tasks, ignores duplicates and rejects other projects' labels", async () => {
+    const { agent } = ctx;
+    const bug = (await mkLabel("Bug")).body;
+    const ui = (await mkLabel("UI")).body;
+    const t = (await mkTask({ title: "A", labelIds: [ui.id, bug.id, bug.id] }).expect(201)).body;
+    expect(t.labelIds).toEqual([bug.id, ui.id]); // in name order
+
+    const other = (await agent.post("/api/projects").send({ name: "P2" })).body;
+    const foreign = (await agent.post(`/api/projects/${other.id}/labels`).send({ name: "Bug" }).expect(201)).body;
+    await mkTask({ title: "B", labelIds: [foreign.id] }).expect(400);
+    await agent.patch(`/api/tasks/${t.id}`).send({ labelIds: [foreign.id] }).expect(400);
+
+    // Other fields leave labels alone; sending labelIds replaces them.
+    expect((await agent.patch(`/api/tasks/${t.id}`).send({ title: "A2" }).expect(200)).body.labelIds).toEqual([bug.id, ui.id]);
+    expect((await agent.patch(`/api/tasks/${t.id}`).send({ labelIds: [ui.id] }).expect(200)).body.labelIds).toEqual([ui.id]);
+    const list = (await agent.get(`/api/projects/${ctx.projectId}/tasks`)).body;
+    expect(list[0].labelIds).toEqual([ui.id]);
+  });
+
+  it("logs label changes on tasks by name, and deleting a label logs each task it leaves", async () => {
+    const { agent, projectId } = ctx;
+    const bug = (await mkLabel("Bug")).body;
+    const ui = (await mkLabel("UI")).body;
+    const t = (await mkTask({ title: "A", labelIds: [bug.id] })).body;
+    await agent.patch(`/api/tasks/${t.id}`).send({ labelIds: [bug.id, ui.id] }).expect(200);
+    await agent.patch(`/api/tasks/${t.id}`).send({ labelIds: [ui.id, bug.id] }).expect(200); // same set: not logged
+
+    let items = (await agent.get(`/api/tasks/${t.id}/activity`)).body.items;
+    expect(items).toHaveLength(2);
+    expect(items[0].diff).toEqual({ labels: { from: "Bug", to: "Bug, UI" } });
+    expect(items[1].diff.labels).toEqual({ from: null, to: "Bug" });
+
+    await agent.patch(`/api/labels/${ui.id}`).send({ name: "Frontend" }).expect(200);
+    await agent.delete(`/api/labels/${bug.id}`).expect(204);
+    expect((await agent.get(`/api/tasks/${t.id}`)).body.labelIds).toEqual([ui.id]);
+    items = (await agent.get(`/api/tasks/${t.id}/activity`)).body.items;
+    expect(items[0].diff).toEqual({ labels: { from: "Bug, Frontend", to: "Frontend" } });
+
+    const project = (await agent.get(`/api/projects/${projectId}/activity`)).body.items as { entity: string; action: string; label: string; diff: unknown }[];
+    const labelEntries = project.filter((e) => e.entity === "label").map((e) => `${e.action} ${e.label}`);
+    expect(labelEntries).toEqual(["deleted Bug", "updated Frontend", "created UI", "created Bug"]);
+    const left = (await agent.get(`/api/projects/${projectId}/labels`)).body;
+    expect(left.map((l: { name: string }) => l.name)).toEqual(["Frontend"]);
+  });
+
+  it("lets viewers read labels but only editors change them; outsiders get 404", async () => {
+    const { db, agent, projectId } = ctx;
+    const bug = (await mkLabel("Bug")).body;
+    const viewer = await signUp(db, "Vic", "vic@x.com");
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "vic@x.com", role: "viewer" }).expect(201);
+    await viewer.get(`/api/projects/${projectId}/labels`).expect(200);
+    await viewer.post(`/api/projects/${projectId}/labels`).send({ name: "Nope" }).expect(403);
+    await viewer.patch(`/api/labels/${bug.id}`).send({ name: "Nope" }).expect(403);
+    await viewer.delete(`/api/labels/${bug.id}`).expect(403);
+
+    const outsider = await signUp(db, "Out", "out@x.com");
+    await outsider.get(`/api/projects/${projectId}/labels`).expect(404);
+    await outsider.patch(`/api/labels/${bug.id}`).send({ name: "Nope" }).expect(404);
+  });
+
+  it("goes when its project or task is deleted", async () => {
+    const { db, agent, projectId } = ctx;
+    const bug = (await mkLabel("Bug")).body;
+    const t = (await mkTask({ title: "A", labelIds: [bug.id] })).body;
+    await agent.delete(`/api/tasks/${t.id}`).expect(204);
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM task_labels`).get()).toEqual({ n: 0 });
+    await agent.delete(`/api/projects/${projectId}`).expect(204);
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM labels`).get()).toEqual({ n: 0 });
+  });
+});
+
+describe("migration 7 (labels)", () => {
+  it("keeps existing activity entries, their order and the append-only triggers", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const { migrations } = await import("../src/db/migrations.ts");
+    const { migrate } = await import("../src/db/index.ts");
+    const db = new DatabaseSync(":memory:");
+    db.exec("PRAGMA foreign_keys = ON");
+    for (const m of migrations.slice(0, 6)) db.exec(m);
+    db.exec("PRAGMA user_version = 6");
+    const add = db.prepare(`INSERT INTO activity (id, project_id, entity, entity_id, action) VALUES (?, 'p', 'task', 't', 'created')`);
+    for (const id of ["z", "a", "m"]) add.run(id);
+    migrate(db);
+
+    const rows = db.prepare(`SELECT rowid AS seq, id FROM activity ORDER BY rowid`).all();
+    expect(rows).toEqual([{ seq: 1, id: "z" }, { seq: 2, id: "a" }, { seq: 3, id: "m" }]);
+    db.prepare(`INSERT INTO activity (id, project_id, entity, entity_id, action) VALUES ('l', 'p', 'label', 'x', 'created')`).run();
+    expect(() => db.exec(`DELETE FROM activity`)).toThrow(/append-only/);
+    expect(() => db.exec(`UPDATE activity SET label = 'x'`)).toThrow(/append-only/);
+  });
+});

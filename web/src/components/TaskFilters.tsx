@@ -4,12 +4,14 @@ import {
   ASSIGNEE_NONE,
   DUE_FILTER_LABELS,
   EMPTY_TASK_FILTER,
+  LABEL_NONE,
   PRIORITIES,
   PRIORITY_LABELS,
   TASK_STATUSES,
   TASK_STATUS_LABELS,
   activeFilterCount,
   type DueFilter,
+  type Label,
   type Member,
   type TaskFilter,
 } from "@rpit/shared";
@@ -27,6 +29,7 @@ export function TaskFilters(props: {
   filter: TaskFilter;
   onChange: (f: TaskFilter, opts?: { replace?: boolean }) => void;
   members: Member[];
+  labels: Label[];
   meId: string | null;
   shown: number;
   total: number;
@@ -57,6 +60,14 @@ export function TaskFilters(props: {
         selected={filter.status}
         onChange={(v) => set("status", v as TaskFilter["status"])}
       />
+      {(props.labels.length > 0 || filter.label.length > 0) && (
+        <FilterMenu
+          label="Label"
+          options={[[LABEL_NONE, "No labels"], ...props.labels.map((l): [string, string] => [l.id, l.name])]}
+          selected={filter.label}
+          onChange={(v) => set("label", v)}
+        />
+      )}
       <select
         className={`inline ${filter.due !== "all" ? "on" : ""}`}
         aria-label="Filter by due date"

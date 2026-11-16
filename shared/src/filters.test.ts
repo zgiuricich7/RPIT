@@ -3,6 +3,7 @@ import {
   ASSIGNEE_ME,
   ASSIGNEE_NONE,
   EMPTY_TASK_FILTER,
+  LABEL_NONE,
   activeFilterCount,
   parseTaskFilter,
   taskMatcher,
@@ -11,13 +12,14 @@ import {
 } from "./filters.ts";
 import type { Priority, TaskStatus } from "./schemas.ts";
 
-const task = (title: string, o: Partial<{ description: string; assigneeId: string | null; priority: Priority; status: TaskStatus; dueDate: string | null }> = {}) => ({
+const task = (title: string, o: Partial<{ description: string; assigneeId: string | null; priority: Priority; status: TaskStatus; dueDate: string | null; labelIds: string[] }> = {}) => ({
   title,
   description: "",
   assigneeId: null,
   priority: "medium" as Priority,
   status: "todo" as TaskStatus,
   dueDate: null,
+  labelIds: [] as string[],
   ...o,
 });
 const ctx = { today: "2026-03-10", userId: "u-me" };
@@ -26,8 +28,8 @@ const run = (f: Partial<TaskFilter>, tasks: ReturnType<typeof task>[]) =>
 
 describe("taskMatcher", () => {
   const tasks = [
-    task("Fix login bug", { description: "Users see a **500** on submit", assigneeId: "u-me", priority: "high", status: "in_progress" }),
-    task("Write résumé page", { assigneeId: "u-other", priority: "low" }),
+    task("Fix login bug", { description: "Users see a **500** on submit", assigneeId: "u-me", priority: "high", status: "in_progress", labelIds: ["bug", "auth"] }),
+    task("Write résumé page", { assigneeId: "u-other", priority: "low", labelIds: ["docs"] }),
     task("Login page copy", { priority: "high", status: "done" }),
     task("Overdue thing", { dueDate: "2026-03-01", priority: "medium" }),
   ];
@@ -55,6 +57,13 @@ describe("taskMatcher", () => {
     expect(run({ assignee: ["u-other", ASSIGNEE_NONE] }, tasks)).toEqual(["Write résumé page", "Login page copy", "Overdue thing"]);
   });
 
+  it("matches any selected label, or tasks with none", () => {
+    expect(run({ label: ["bug"] }, tasks)).toEqual(["Fix login bug"]);
+    expect(run({ label: ["bug", "docs"] }, tasks)).toEqual(["Fix login bug", "Write résumé page"]);
+    expect(run({ label: [LABEL_NONE] }, tasks)).toEqual(["Login page copy", "Overdue thing"]);
+    expect(run({ label: ["docs", LABEL_NONE], priority: ["low", "high"] }, tasks)).toEqual(["Write résumé page", "Login page copy"]);
+  });
+
   it("combines with the due filter", () => {
     expect(run({ due: "overdue" }, tasks)).toEqual(["Overdue thing"]);
     expect(run({ due: "overdue", priority: ["high"] }, tasks)).toEqual([]);
@@ -77,9 +86,9 @@ const apply = (qs: string, f: TaskFilter) => {
 
 describe("URL round trip", () => {
   it("parses, drops unknown values and writes back without touching other params", () => {
-    const f = parseTaskFilter(parse("q=login&assignee=me,none,me&priority=high,bogus&status=done&due=nope&view=board&task=t1"));
-    expect(f).toEqual({ q: "login", assignee: ["me", "none"], priority: ["high"], status: ["done"], due: "all" });
-    expect(activeFilterCount(f)).toBe(4);
+    const f = parseTaskFilter(parse("q=login&assignee=me,none,me&priority=high,bogus&status=done&label=l1,none&due=nope&view=board&task=t1"));
+    expect(f).toEqual({ q: "login", assignee: ["me", "none"], priority: ["high"], status: ["done"], label: ["l1", "none"], due: "all" });
+    expect(activeFilterCount(f)).toBe(5);
 
     const out = apply("view=board&task=t1&priority=low", f);
     expect(parse(out).get("view")).toBe("board");

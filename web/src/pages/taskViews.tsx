@@ -41,6 +41,7 @@ import {
   projectTreeDrop,
   type TaskFilter,
   type FlatRow,
+  type Label,
   type Task,
   type TaskSort,
   type TaskStatus,
@@ -48,7 +49,7 @@ import {
 } from "@rpit/shared";
 import { useMoveTask } from "../api/hooks.ts";
 import { useDialogs } from "../components/dialogs.tsx";
-import { AssigneeName, DueDate, Meter, TaskStatusPill, priorityLabel } from "../components/ui.tsx";
+import { AssigneeName, DueDate, Meter, TaskLabels, TaskStatusPill, priorityLabel } from "../components/ui.tsx";
 import { formatDate } from "../lib/format.ts";
 
 /**
@@ -66,6 +67,8 @@ export interface ViewOptions {
   filtered: boolean;
   sort: TaskSort;
   today: string;
+  /** The project's labels, for showing tasks' label chips. */
+  labels: Label[];
 }
 
 /** Pixels per tree level: indentation, and how far to drag sideways to nest or un-nest. */
@@ -104,7 +107,7 @@ const screenReaderInstructions = {
 
 export function ListView(props: { projectId: string; tasks: Task[]; users: User[] | undefined; canEdit: boolean; opts: ViewOptions }) {
   const { projectId, tasks, users, canEdit, opts } = props;
-  const { matches, filtered, sort, today } = opts;
+  const { matches, filtered, sort, today, labels } = opts;
   const move = useMoveTask(projectId);
   const sensors = useDragSensors();
   // Order and nesting only mean something in manual order with every task shown.
@@ -231,7 +234,7 @@ export function ListView(props: { projectId: string; tasks: Task[]; users: User[
                     open={!collapsed.has(row.id)}
                     onToggle={() => toggle(row.id)}
                     context={filtered && !matches(byId.get(row.id)!)}
-                    {...{ tasks, users, canEdit, draggable, today }}
+                    {...{ tasks, users, canEdit, draggable, today, labels }}
                   />
                 ))}
               </tbody>
@@ -256,8 +259,9 @@ function TaskRow(props: {
   canEdit: boolean;
   draggable: boolean;
   today: string;
+  labels: Label[];
 }) {
-  const { task: t, depth, childCount, open, tasks, users, canEdit, draggable, today } = props;
+  const { task: t, depth, childCount, open, tasks, users, canEdit, draggable, today, labels } = props;
   const dialogs = useDialogs();
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
     id: t.id,
@@ -292,6 +296,7 @@ function TaskRow(props: {
           <button className={`title-btn ${t.status === "done" ? "done" : ""}`} onClick={() => dialogs.openTask(t.id)}>
             {t.title}
           </button>
+          <TaskLabels ids={t.labelIds} labels={labels} />
           {isDragging && childCount > 0 && (
             <span className="comment-count">
               +{childCount} subtask{childCount > 1 ? "s" : ""}
@@ -333,7 +338,7 @@ const noReorder: SortingStrategy = () => null;
 
 export function BoardView(props: { projectId: string; tasks: Task[]; users: User[] | undefined; canEdit: boolean; opts: ViewOptions }) {
   const { projectId, tasks, users, canEdit } = props;
-  const { filter, matches, sort, today } = props.opts;
+  const { filter, matches, sort, today, labels } = props.opts;
   // Filtering by status shows just those columns.
   const statuses = filter.status.length ? TASK_STATUSES.filter((s) => filter.status.includes(s)) : TASK_STATUSES;
   const move = useMoveTask(projectId);
@@ -488,14 +493,14 @@ export function BoardView(props: { projectId: string; tasks: Task[]; users: User
             >
               {shown[status].map((id) => {
                 const t = byId.get(id);
-                return t ? <BoardCard key={id} task={t} {...{ tasks, users, canEdit, today }} hasKids={hasKids(id)} /> : null;
+                return t ? <BoardCard key={id} task={t} {...{ tasks, users, canEdit, today, labels }} hasKids={hasKids(id)} /> : null;
               })}
             </BoardColumn>
           ))}
         </div>
         <DragOverlay>
           {active && (
-            <CardBody task={active} tasks={tasks} users={users} canEdit={false} today={today} hasKids={hasKids(active.id)} />
+            <CardBody task={active} tasks={tasks} users={users} canEdit={false} today={today} labels={labels} hasKids={hasKids(active.id)} />
           )}
         </DragOverlay>
       </DndContext>
@@ -533,6 +538,7 @@ interface CardProps {
   users: User[] | undefined;
   canEdit: boolean;
   today: string;
+  labels: Label[];
   hasKids: boolean;
 }
 
@@ -561,7 +567,7 @@ function BoardCard(props: CardProps) {
   );
 }
 
-function CardBody({ task: t, tasks, users, canEdit, today, hasKids }: CardProps) {
+function CardBody({ task: t, tasks, users, canEdit, today, labels, hasKids }: CardProps) {
   const dialogs = useDialogs();
   const crumb = ancestors(tasks, t.id)
     .map((a) => a.title)
@@ -572,6 +578,11 @@ function CardBody({ task: t, tasks, users, canEdit, today, hasKids }: CardProps)
       <button className="title-btn" onClick={() => dialogs.openTask(t.id)}>
         {t.title}
       </button>
+      {t.labelIds.length > 0 && (
+        <div className="card-labels">
+          <TaskLabels ids={t.labelIds} labels={labels} />
+        </div>
+      )}
       {hasKids && <Meter {...leafProgress(tasks, t.id)} />}
       {t.dueDate && (
         <div className="card-due">

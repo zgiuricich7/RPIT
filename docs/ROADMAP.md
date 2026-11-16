@@ -39,7 +39,11 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
     (including "Me" and "Unassigned"), priority, status and due filters on the list and board, kept in the
     URL so filtered views can be bookmarked and shared. Follow-up: saved views, searching comments, and
     server-side filtering if task lists get large.
-2.4 **Labels/tags** per project.
+2.4 ~~**Labels/tags** per project.~~ Done: project labels with a name and a colour from a fixed palette
+    (names unique per project, ignoring case); chips on the list, board and task dialog; pick or create labels
+    in the task dialog; a Labels page to rename, recolour and delete them with usage counts; a label filter
+    (including "No labels") kept in the URL; label and task-label changes are audited and live-updated.
+    Follow-up: labels on test cases, label descriptions, searching by label name, and grouping the board by label.
 2.5 **Status roll-up option**: automatically set a parent to Done when all children are done.
 2.6 **Attachments** on tasks and test cases.
 2.7 **Configurable board columns** per project (custom statuses).

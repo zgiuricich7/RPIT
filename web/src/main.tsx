@@ -7,6 +7,7 @@ import { ProjectLayout } from "./components/ProjectLayout.tsx";
 import { AuthPage } from "./pages/AuthPage.tsx";
 import { HomePage } from "./pages/HomePage.tsx";
 import { InboxPage } from "./pages/InboxPage.tsx";
+import { LabelsPage } from "./pages/LabelsPage.tsx";
 import { MembersPage } from "./pages/MembersPage.tsx";
 import { OverviewPage } from "./pages/OverviewPage.tsx";
 import { TasksPage } from "./pages/TasksPage.tsx";
@@ -39,6 +40,7 @@ function App() {
         <Route path="overview" element={<OverviewPage />} />
         <Route path="tasks" element={<TasksPage />} />
         <Route path="tests" element={<TestsPage />} />
+        <Route path="labels" element={<LabelsPage />} />
         <Route path="members" element={<MembersPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

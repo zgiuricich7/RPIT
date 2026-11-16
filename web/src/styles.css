@@ -120,6 +120,33 @@ main.page { padding: 20px; max-width: 1400px; margin: 0 auto; }
 .meter > i { display: block; height: 100%; background: var(--done); }
 .stack { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--line); margin-bottom: 12px; }
 .stack > i { display: block; height: 100%; }
+/* Label chips: --lc is the label's colour (text and border); the fill is a tint of it. */
+.lc-gray { --lc: #4b5563; } .lc-red { --lc: #b91c1c; } .lc-orange { --lc: #c2410c; }
+.lc-yellow { --lc: #a16207; } .lc-green { --lc: #15803d; } .lc-teal { --lc: #0f766e; }
+.lc-blue { --lc: #1d4ed8; } .lc-purple { --lc: #7e22ce; } .lc-pink { --lc: #be185d; }
+@media (prefers-color-scheme: dark) {
+  .lc-gray { --lc: #a3acb9; } .lc-red { --lc: #fca5a5; } .lc-orange { --lc: #fdba74; }
+  .lc-yellow { --lc: #fde047; } .lc-green { --lc: #86efac; } .lc-teal { --lc: #5eead4; }
+  .lc-blue { --lc: #93c5fd; } .lc-purple { --lc: #d8b4fe; } .lc-pink { --lc: #f9a8d4; }
+}
+.label-chip {
+  display: inline-block; padding: 0 7px; border-radius: 99px; font-size: 11px; font-weight: 500; line-height: 18px;
+  color: var(--lc); background: color-mix(in srgb, var(--lc) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--lc) 40%, transparent); white-space: nowrap;
+  max-width: 16em; overflow: hidden; text-overflow: ellipsis; vertical-align: middle;
+}
+.labels { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.tree-name .labels { margin-left: 4px; }
+.card .card-labels { margin-top: 6px; }
+.label-picker { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.toggle-chip { font: inherit; font-size: 12px; line-height: 22px; padding: 0 9px; cursor: pointer; background: none; opacity: 0.75; }
+.toggle-chip.on { background: color-mix(in srgb, var(--lc) 18%, transparent); border-color: var(--lc); opacity: 1; }
+.toggle-chip:hover { opacity: 1; }
+.label-add { display: inline-flex; gap: 6px; align-items: center; }
+.label-add input { width: 160px; padding: 3px 8px; font-size: 12px; }
+.label-preview { align-self: center; padding-bottom: 6px; }
+.labels-table { min-width: 560px; }
+.labels-table input { max-width: 260px; }
 .comment-count { font-size: 12px; color: var(--mute); margin-left: 8px; font-weight: 400; }
 
 /* ---------- Tables ---------- */

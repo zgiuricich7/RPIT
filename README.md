@@ -9,13 +9,14 @@ and test case tracking — with a per-project overview dashboard.
 - **Project members** with owner, editor and viewer roles; invite teammates by email
 - **Unlimited subtask nesting** with progress roll-ups (measured on tasks that have no subtasks)
 - **List view** (collapsible tree) and **Board view** (drag cards between status columns)
+- **Labels** per project (name and colour) to tag tasks; filter the list and board by label
 - **Comments** on every task, with authors and timestamps, **@-mentions** of project members, and editing
 - **Markdown** in comments and every description/notes field, with a formatting toolbar and preview
 - **Inbox** of in-app notifications when you're assigned a task or test, mentioned, or someone
   comments on a task you follow
 - **Test cases** with steps, expected result, notes, assignee, priority and a linked task;
   dashboard with pass rate and status filters
-- **Activity log**: every change to projects, members, tasks, comments and test cases is recorded
+- **Activity log**: every change to projects, members, tasks, labels, comments and test cases is recorded
   with who, when and what changed (before and after). Shown as a project feed and per-task/test history.
   The log is append-only.
 - **Overview** per project: completion, task and test status breakdowns, items needing attention,

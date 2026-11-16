@@ -56,6 +56,8 @@ export const hasRole = (role: ProjectRole | null | undefined, min: ProjectRole):
 
 const id = z.string().min(1);
 const nullableId = id.nullable();
+/** Label ids on a task; duplicates are ignored by the server. */
+const labelIds = z.array(id).max(20, "A task can have at most 20 labels");
 const title = z.string().trim().min(1, "Title is required").max(200);
 const longText = z.string().max(20_000);
 /** A calendar date ("YYYY-MM-DD") or null to clear it. */
@@ -116,6 +118,7 @@ export const TaskInput = z.object({
   startDate: calendarDate.default(null),
   dueDate: calendarDate.default(null),
   remindAssignee: z.boolean().default(false),
+  labelIds: labelIds.default([]),
 }).refine(datesInOrder, { message: START_AFTER_DUE, path: ["startDate"] });
 /**
  * When only one date is sent, the server checks the order against the stored
@@ -132,6 +135,8 @@ export const TaskPatch = z
     startDate: calendarDate,
     dueDate: calendarDate,
     remindAssignee: z.boolean(),
+    /** Replaces the task's labels. */
+    labelIds,
   })
   .partial()
   .refine(datesInOrder, { message: START_AFTER_DUE, path: ["startDate"] });
@@ -152,6 +157,28 @@ export const TaskMove = z.object({
 export type TaskMove = z.infer<typeof TaskMove>;
 export type TaskInput = z.input<typeof TaskInput>;
 export type TaskPatch = z.infer<typeof TaskPatch>;
+
+// ---------- Labels ----------
+/** Label colours are a fixed palette so they work in light and dark themes. */
+export const LABEL_COLORS = ["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"] as const;
+export const LabelColor = z.enum(LABEL_COLORS);
+export type LabelColor = z.infer<typeof LabelColor>;
+export const LABEL_COLOR_LABELS: Record<LabelColor, string> = {
+  gray: "Gray",
+  red: "Red",
+  orange: "Orange",
+  yellow: "Yellow",
+  green: "Green",
+  teal: "Teal",
+  blue: "Blue",
+  purple: "Purple",
+  pink: "Pink",
+};
+const labelName = z.string().trim().min(1, "Name is required").max(50, "Keep label names to 50 characters");
+export const LabelInput = z.object({ name: labelName, color: LabelColor.default("gray") });
+export const LabelPatch = z.object({ name: labelName, color: LabelColor }).partial();
+export type LabelInput = z.input<typeof LabelInput>;
+export type LabelPatch = z.infer<typeof LabelPatch>;
 
 // ---------- Comments ----------
 export const CommentInput = z.object({
@@ -182,7 +209,7 @@ export const NotificationPatch = z.object({ read: z.boolean() });
 export type NotificationPatch = z.infer<typeof NotificationPatch>;
 
 // ---------- Activity log ----------
-export const ACTIVITY_ENTITIES = ["project", "member", "task", "comment", "test_case"] as const;
+export const ACTIVITY_ENTITIES = ["project", "member", "task", "comment", "test_case", "label"] as const;
 export const ACTIVITY_ACTIONS = ["created", "updated", "deleted"] as const;
 export const ActivityEntity = z.enum(ACTIVITY_ENTITIES);
 export const ActivityAction = z.enum(ACTIVITY_ACTIONS);
@@ -255,10 +282,21 @@ export interface Task {
   dueDate: string | null;
   /** Send the assignee in-app reminders on the start date, the day before the due date and on it. */
   remindAssignee: boolean;
+  /** Ids of the project labels on this task. */
+  labelIds: string[];
   position: number;
   commentCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/** A project-scoped label (tag) for tasks. Names are unique per project, ignoring case. */
+export interface Label {
+  id: string;
+  projectId: string;
+  name: string;
+  color: LabelColor;
+  createdAt: string;
 }
 
 export interface CommentMention {

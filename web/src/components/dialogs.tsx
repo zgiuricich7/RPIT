@@ -24,6 +24,7 @@ import {
   useDeleteTask,
   useDeleteTest,
   useEditComment,
+  useLabels,
   useMe,
   usePostComment,
   useMembers,
@@ -38,6 +39,7 @@ import {
 } from "../api/hooks.ts";
 import { formatDateTime } from "../lib/format.ts";
 import { ActivityFeed } from "./activity.tsx";
+import { LabelPicker } from "./labels.tsx";
 import { CommentBody, MarkdownEditor } from "./markdown.tsx";
 import { Modal, Options } from "./ui.tsx";
 
@@ -112,6 +114,7 @@ function TaskDialog(props: {
 }) {
   const { projectId, task, tasks, onClose } = props;
   const members = useMembers(projectId).data ?? [];
+  const labels = useLabels(projectId).data;
   const { canEdit } = useProjectRole(projectId);
   const create = useCreateTask(projectId);
   const update = useUpdateTask(projectId);
@@ -126,6 +129,7 @@ function TaskDialog(props: {
     startDate: task?.startDate ?? "",
     dueDate: task?.dueDate ?? "",
     remindAssignee: task?.remindAssignee ?? false,
+    labelIds: task?.labelIds ?? [],
   });
   const [error, setError] = useState<string | null>(null);
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
@@ -142,6 +146,8 @@ function TaskDialog(props: {
       parentId: form.parentId || null,
       startDate: form.startDate || null,
       dueDate: form.dueDate || null,
+      // Drop labels someone deleted while the dialog was open.
+      labelIds: labels ? form.labelIds.filter((id) => labels.some((l) => l.id === id)) : form.labelIds,
     };
     try {
       if (task) await update.mutateAsync({ id: task.id, ...body });
@@ -246,6 +252,12 @@ function TaskDialog(props: {
             />
             Remind the assignee on the start date, the day before it's due and on the due date
           </label>
+          <LabelPicker
+            projectId={projectId}
+            value={form.labelIds}
+            onChange={(update) => setForm((f) => ({ ...f, labelIds: update(f.labelIds) }))}
+            readOnly={!canEdit}
+          />
         </fieldset>
         {error && <div className="form-error">{error}</div>}
         <div style={{ display: "flex", gap: 8 }}>

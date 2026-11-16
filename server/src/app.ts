@@ -10,6 +10,7 @@ import { trackClientId } from "./events.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { projectActivityRoutes } from "./routes/activity.ts";
 import { projectEventRoutes } from "./routes/events.ts";
+import { labelRoutes } from "./routes/labels.ts";
 import { memberRoutes } from "./routes/members.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
 import { projectRoutes } from "./routes/projects.ts";
@@ -44,14 +45,17 @@ export function createApp(db: DB, opts: AppOptions = {}) {
 
   const tasks = taskRoutes(db);
   const tests = testCaseRoutes(db);
+  const labels = labelRoutes(db);
   api.use("/projects/:projectId/tasks", tasks.byProject);
   api.use("/projects/:projectId/tests", tests.byProject);
+  api.use("/projects/:projectId/labels", labels.byProject);
   api.use("/projects/:projectId/members", memberRoutes(db));
   api.use("/projects/:projectId/activity", projectActivityRoutes(db));
   api.use("/projects/:projectId/events", projectEventRoutes(db));
   api.use("/projects", projectRoutes(db));
   api.use("/tasks", tasks.byId);
   api.use("/tests", tests.byId);
+  api.use("/labels", labels.byId);
   api.use("/comments", commentRoutes(db));
   api.use("/notifications", notificationRoutes(db));
   api.use((_req, _res) => {

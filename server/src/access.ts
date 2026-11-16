@@ -40,6 +40,11 @@ export const byTestCase: ProjectResolver = {
   what: "Test case",
   sql: `SELECT project_id FROM test_cases WHERE id = ?`,
 };
+export const byLabel: ProjectResolver = {
+  param: "labelId",
+  what: "Label",
+  sql: `SELECT project_id FROM labels WHERE id = ?`,
+};
 export const byComment: ProjectResolver = {
   param: "commentId",
   what: "Comment",

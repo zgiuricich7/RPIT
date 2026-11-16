@@ -16,9 +16,10 @@ import { HttpError, notFound, param, parseBody } from "../http.ts";
 import { currentUser } from "../auth.ts";
 import { byComment, byTask, currentProject, requireProjectRole } from "../access.ts";
 import { notifyAssignment, recordCommentActivity, recordCommentEdit } from "../notify.ts";
-import { changes, logActivity, snapshot, TASK_FIELDS } from "../activity.ts";
+import { auditedTask, changes, logActivity, snapshot, TASK_FIELDS } from "../activity.ts";
 import { publishEvent } from "../events.ts";
 import { activityPage } from "./activity.ts";
+import { checkLabels, setTaskLabels } from "./labels.ts";
 
 /** Assignees must be members of the project. */
 export function checkAssignee(db: DB, projectId: string, assigneeId: string | null | undefined) {
@@ -81,6 +82,7 @@ export function taskRoutes(db: DB) {
     const input = parseBody(TaskInput, req.body);
     checkParent(projectId, input.parentId);
     checkAssignee(db, projectId, input.assigneeId);
+    const labelIds = checkLabels(db, projectId, input.labelIds);
     const id = newId();
     const task = transaction(db, () => {
       db.prepare(
@@ -101,8 +103,9 @@ export function taskRoutes(db: DB) {
         input.remindAssignee ? 1 : 0,
         nextPosition(projectId),
       );
+      setTaskLabels(db, id, labelIds);
       const t = requireTask(id);
-      logActivity(db, { ...taskEntry(t), actorId, action: "created", diff: snapshot(t, TASK_FIELDS, "created") });
+      logActivity(db, { ...taskEntry(t), actorId, action: "created", diff: snapshot(auditedTask(db, t), TASK_FIELDS, "created") });
       notifyAssignment(db, { kind: "task_assigned", actorId, projectId, id }, null, input.assigneeId);
       return t;
     });
@@ -130,12 +133,14 @@ export function taskRoutes(db: DB) {
       position = nextPosition(cur.projectId);
     }
     if (p.assigneeId !== undefined && p.assigneeId !== cur.assigneeId) checkAssignee(db, cur.projectId, p.assigneeId);
+    const labelIds = p.labelIds === undefined ? undefined : checkLabels(db, cur.projectId, p.labelIds);
     const merged = { ...cur, ...p, position };
     // The schema checks the order when both dates are sent; this covers changing just one.
     if (merged.startDate && merged.dueDate && merged.startDate > merged.dueDate) {
       throw new HttpError(400, START_AFTER_DUE, { startDate: [START_AFTER_DUE] });
     }
     const task = transaction(db, () => {
+      const before = auditedTask(db, cur);
       db.prepare(
         `UPDATE tasks SET parent_id = ?, title = ?, description = ?, status = ?, priority = ?,
            assignee_id = ?, start_date = ?, due_date = ?, remind_assignee = ?, position = ?, updated_at = ?
@@ -154,8 +159,9 @@ export function taskRoutes(db: DB) {
         now(),
         id,
       );
+      if (labelIds) setTaskLabels(db, id, labelIds);
       const t = requireTask(id);
-      logActivity(db, { ...taskEntry(t), actorId, action: "updated", diff: changes(cur, t, TASK_FIELDS) });
+      logActivity(db, { ...taskEntry(t), actorId, action: "updated", diff: changes(before, auditedTask(db, t), TASK_FIELDS) });
       notifyAssignment(
         db,
         { kind: "task_assigned", actorId, projectId: cur.projectId, id },
@@ -214,7 +220,9 @@ export function taskRoutes(db: DB) {
         id,
       );
       const t = requireTask(id);
-      const diff = changes(cur, t, TASK_FIELDS);
+      // Labels can't change here, so they're the same on both sides.
+      const labels = auditedTask(db, t).labels;
+      const diff = changes({ ...cur, labels }, { ...t, labels }, TASK_FIELDS);
       if (Object.keys(diff).length) {
         logActivity(db, { ...taskEntry(t), actorId, action: "updated", diff });
       } else if (t.position !== cur.position) {
@@ -245,7 +253,7 @@ export function taskRoutes(db: DB) {
         .all(id) as { id: string }[];
       for (const { id: tid } of subtree) {
         const t = requireTask(tid);
-        const diff = snapshot(t, TASK_FIELDS, "deleted");
+        const diff = snapshot(auditedTask(db, t), TASK_FIELDS, "deleted");
         if (tid !== id) diff.deletedWith = { from: root.title, to: null };
         logActivity(db, { ...taskEntry(t), actorId, action: "deleted", diff });
       }

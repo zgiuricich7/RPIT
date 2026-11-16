@@ -5,6 +5,7 @@ import {
   PRIORITY_LABELS,
   TASK_STATUS_LABELS,
   TEST_STATUS_LABELS,
+  type Label,
   type Priority,
   type Task,
   type TaskStatus,
@@ -58,6 +59,28 @@ export function Stack<K extends string>(props: { counts: Record<K, number>; colo
 export function AssigneeName({ id, users }: { id: string | null; users: User[] | undefined }) {
   if (!id) return <span className="muted">Unassigned</span>;
   return <>{users?.find((u) => u.id === id)?.name ?? "Unknown user"}</>;
+}
+
+/** A label's coloured chip. */
+export const LabelChip = ({ label }: { label: Pick<Label, "name" | "color"> }) => (
+  <span className={`label-chip lc-${label.color}`}>{label.name}</span>
+);
+
+/**
+ * A task's labels, in the project's label order (by name). Ids without a
+ * loaded label (just deleted, or still loading) are skipped.
+ */
+export function TaskLabels({ ids, labels }: { ids: string[]; labels: Label[] | undefined }) {
+  if (!ids.length || !labels) return null;
+  const shown = labels.filter((l) => ids.includes(l.id));
+  if (!shown.length) return null;
+  return (
+    <span className="labels" aria-label={`Labels: ${shown.map((l) => l.name).join(", ")}`}>
+      {shown.map((l) => (
+        <LabelChip key={l.id} label={l} />
+      ))}
+    </span>
+  );
 }
 
 export function Options<K extends string>({ labels }: { labels: Record<K, string> }) {

@@ -4,6 +4,9 @@ import { hasRole, positionBetween, type ProjectRole } from "@rpit/shared";
 import type {
   ActivityPage,
   Comment,
+  Label,
+  LabelInput,
+  LabelPatch,
   LoginInput,
   Member,
   MemberInput,
@@ -41,6 +44,7 @@ export const keys = {
   summary: (projectId: string) => ["project", projectId, "summary"] as const,
   recent: (projectId: string) => ["project", projectId, "recent-comments"] as const,
   members: (projectId: string) => ["project", projectId, "members"] as const,
+  labels: (projectId: string) => ["project", projectId, "labels"] as const,
   /** Under the project prefix, so every project mutation refreshes the logs too. */
   activity: (projectId: string, scope?: { task?: string; test?: string }) =>
     ["project", projectId, "activity", scope ?? {}] as const,
@@ -276,6 +280,37 @@ export function useDeleteTask(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api<void>(`/tasks/${id}`, { method: "DELETE" }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+// ---------- Labels ----------
+/** The project's labels, sorted by name. Label changes also change tasks, so mutations refresh the whole project. */
+export function useLabels(projectId: string) {
+  return useQuery({ queryKey: keys.labels(projectId), queryFn: () => api<Label[]>(`/projects/${projectId}/labels`) });
+}
+
+export function useCreateLabel(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: LabelInput) => api<Label>(`/projects/${projectId}/labels`, { method: "POST", body: input }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+export function useUpdateLabel(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...patch }: LabelPatch & { id: string }) =>
+      api<Label>(`/labels/${id}`, { method: "PATCH", body: patch }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+export function useDeleteLabel(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<void>(`/labels/${id}`, { method: "DELETE" }),
     onSuccess: () => invalidateProject(qc, projectId),
   });
 }
