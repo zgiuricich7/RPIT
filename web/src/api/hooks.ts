@@ -4,6 +4,7 @@ import { hasRole, positionBetween, type ProjectRole } from "@rpit/shared";
 import type {
   ActivityPage,
   Attachment,
+  Dashboard,
   BoardColumn,
   ColumnInput,
   ColumnPatch,
@@ -68,6 +69,8 @@ export const keys = {
   activity: (projectId: string, scope?: { task?: string; test?: string }) =>
     ["project", projectId, "activity", scope ?? {}] as const,
   comments: (taskId: string) => ["task", taskId, "comments"] as const,
+  /** The home dashboard across projects; not project-scoped. */
+  dashboard: (today: string) => ["dashboard", today] as const,
   /** The signed-in user's inbox; not project-scoped. */
   notifications: ["notifications"] as const,
 };
@@ -117,6 +120,21 @@ export function useLogout() {
 
 export function useUsers() {
   return useQuery({ queryKey: keys.users, queryFn: () => api<User[]>("/users") });
+}
+
+// ---------- Home dashboard ----------
+/**
+ * Everything on the home page, for the viewer's `today` (overdue is theirs).
+ * Not covered by any project's event stream, so it refetches when opened and
+ * every minute while shown.
+ */
+export function useDashboard(today: string) {
+  return useQuery({
+    queryKey: keys.dashboard(today),
+    queryFn: () => api<Dashboard>(`/dashboard?today=${today}`),
+    staleTime: 0,
+    refetchInterval: 60_000,
+  });
 }
 
 // ---------- Projects ----------

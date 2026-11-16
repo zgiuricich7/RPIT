@@ -48,6 +48,7 @@ server/   Express 5 API on Node's built-in SQLite (node:sqlite, no native deps)
   src/activity.ts     logActivity + changes/snapshot diff helpers and the tracked fields per entity
   src/events.ts       in-process EventHub: logActivity publishes a ProjectEvent after commit
   src/routes/events.ts  GET /api/projects/:id/events — server-sent event stream per project
+  src/routes/dashboard.ts  GET /api/dashboard?today= — home page data across the user's projects
   test/api.test.ts    supertest against an in-memory DB
   test/events.test.ts event stream tests (real listening server + fetch, since supertest buffers)
 web/      React 19 + Vite + TanStack Query + React Router 7
@@ -57,7 +58,7 @@ web/      React 19 + Vite + TanStack Query + React Router 7
   src/components/markdown.tsx  MarkdownView (safe rendering + mention highlights), MarkdownEditor (toolbar,
                                Write/Preview, shortcuts), CommentBody
   src/components/mentions.tsx  @-mention autocomplete textarea (used by MarkdownEditor)
-  src/components/TopBar.tsx    header with project switcher and inbox badge
+  src/components/TopBar.tsx    header with Home link (and brand), project switcher and inbox badge
   src/components/activity.tsx  ActivityFeed: renders log entries as sentences + field changes
   src/components/attachments.tsx  Attachments: file list + upload/drop for a task, test case or the project
   src/components/columns.tsx      ColumnsDialog: owners add/rename/recategorise/reorder/delete board columns
@@ -66,7 +67,7 @@ web/      React 19 + Vite + TanStack Query + React Router 7
   src/components/suites.tsx       SuiteSidebar (tree + pass rates on the Tests page), SuiteDialog, SuiteOptions
   src/components/coverage.tsx     CoverageBadge (task list), CoveragePill, TaskTests (task dialog's Tests section)
   src/components/labels.tsx    LabelPicker (toggle chips + create) for the task dialog; LabelChip/TaskLabels are in ui.tsx
-  src/pages/          Overview, Tasks (List + Board; filters and sort in the URL), Tests, Plans (list, ?plan=<id> detail), Coverage,
+  src/pages/          Home (dashboard at /), Overview, Tasks (List + Board; filters and sort in the URL), Tests, Plans (list, ?plan=<id> detail), Coverage,
                       Labels, Members, Inbox, Auth
   src/components/TaskFilters.tsx  search box ("/" focuses it) + assignee/priority/status/label/due filter menus
   src/pages/taskViews.tsx  List and Board views with @dnd-kit drag and drop (mouse, touch, keyboard)
@@ -179,6 +180,9 @@ docs/ROADMAP.md       prioritised backlog
   (failing > blocked > not run > passing, or "none"). Coverage % = tasks without subtasks that have a linked test
   / tasks without subtasks (like progress). "Add test case" from a task opens `?test=new&forTask=<id>`
   (`useDialogs().newTestFor`). The Coverage page keeps its state filter in `?coverage=`.
+- **The home page (`/`) is a dashboard across the user's projects**, from one call: `GET /api/dashboard?today=`
+  (the viewer's local date, so overdue stays the viewer's: the server only compares it). It's membership-scoped
+  by its queries (no `requireProjectRole`). Signing in, the brand and the "Home" link all land there.
 - **Progress = leaf tasks done / leaf tasks** (tasks with no children). Use `leafProgress` from shared;
   the server's `projectSummary` uses the same function, so overview numbers match the UI.
 - **Cache invalidation:** task/test/comment mutations invalidate `["project", projectId]`, which covers
@@ -250,7 +254,8 @@ docs/ROADMAP.md       prioritised backlog
   `GET /api/users` still lists every user; it is only used to display assignee names.
 - Real-time events are in-process (one server). Multiple server processes would need a shared broker
   (e.g. Postgres LISTEN/NOTIFY). Missed events aren't replayed; clients refetch the project on reconnect.
-  The inbox still polls for notifications from projects that aren't open.
+  The inbox still polls for notifications from projects that aren't open, and the home dashboard (which spans
+  projects) refetches when opened and every minute.
 - Notifications are not emailed.
 - The activity log covers project-scoped actions only: sign-ins, sign-ups and inbox read state aren't logged.
   Rows for deleted projects are kept but no API exposes them.

@@ -1713,3 +1713,73 @@ describe("test plans (cycles)", () => {
     expect((await ctx.agent.get(`/api/tests/${a.id}`)).body.status).toBe("passed");
   });
 });
+
+describe("home dashboard", () => {
+  const today = "2026-03-10";
+  const dash = (a = ctx.agent) => a.get(`/api/dashboard?today=${today}`).expect(200).then((r) => r.body);
+
+  it("summarises only the user's projects, most recently active first", async () => {
+    const { db, agent, projectId, userId } = ctx;
+    const second = (await agent.post("/api/projects").send({ name: "P2" })).body;
+    const mk = (pid: string, body: Record<string, unknown>) =>
+      agent.post(`/api/projects/${pid}/tasks`).send(body).expect(201);
+    await mk(projectId, { title: "Late", dueDate: "2026-03-01", assigneeId: userId });
+    await mk(projectId, { title: "Soon", dueDate: "2026-03-15" });
+    await mk(projectId, { title: "Later", dueDate: "2026-04-30" });
+    await mk(projectId, { title: "Done late", dueDate: "2026-03-01", status: "done" });
+    await agent.post(`/api/projects/${projectId}/plans`).send({ name: "Cycle" }).expect(201);
+
+    // An outsider's project never shows up.
+    const other = await signUp(db, "Out", "out@x.com");
+    await other.post("/api/projects").send({ name: "Not yours" }).expect(201);
+
+    const body = await dash();
+    expect(body.projects.map((p: { project: { name: string } }) => p.project.name)).toEqual(["P1", "P2"]);
+    expect(body.projects[0]).toMatchObject({
+      overdueCount: 1,
+      dueSoonCount: 1,
+      openPlanCount: 1,
+      summary: { taskCount: 4, openTaskCount: 3 },
+      project: { role: "owner" },
+    });
+    expect(body.projects[0].lastActivityAt).toEqual(expect.any(String));
+    expect(body.projects[1]).toMatchObject({ project: { id: second.id }, overdueCount: 0 });
+    expect((await dash(other)).projects.map((p: { project: { name: string } }) => p.project.name)).toEqual(["Not yours"]);
+  });
+
+  it("lists my open tasks (dated first) and tests that need attention", async () => {
+    const { db, agent, projectId, userId } = ctx;
+    const mk = (body: Record<string, unknown>) => agent.post(`/api/projects/${projectId}/tasks`).send(body).expect(201);
+    await mk({ title: "No date", assigneeId: userId });
+    await mk({ title: "Due later", dueDate: "2026-04-01", assigneeId: userId });
+    await mk({ title: "Overdue", dueDate: "2026-03-01", assigneeId: userId });
+    await mk({ title: "Finished", assigneeId: userId, status: "done" });
+    await mk({ title: "Someone else's" });
+    const t = (title: string, status: string) =>
+      agent.post(`/api/projects/${projectId}/tests`).send({ title, status, assigneeId: userId }).expect(201);
+    await t("Passing", "passed");
+    await t("Never run", "not_run");
+    await t("Broken", "failed");
+
+    const body = await dash();
+    expect(body.myTasks.map((x: { task: { title: string } }) => x.task.title)).toEqual(["Overdue", "Due later", "No date"]);
+    expect(body.myTasks[0]).toMatchObject({ projectName: "P1", columnName: "To do" });
+    expect(body.myTests.map((x: { test: { title: string } }) => x.test.title)).toEqual(["Broken", "Never run"]);
+
+    // Leaving the project removes its work from my dashboard.
+    const owner2 = await signUp(db, "Own", "own@x.com");
+    const p2 = (await owner2.post("/api/projects").send({ name: "Shared" })).body;
+    await owner2.post(`/api/projects/${p2.id}/members`).send({ email: "t@example.com", role: "editor" }).expect(201);
+    await owner2.post(`/api/projects/${p2.id}/tasks`).send({ title: "Theirs for me", assigneeId: userId }).expect(201);
+    expect((await dash()).myTasks.map((x: { task: { title: string } }) => x.task.title)).toContain("Theirs for me");
+    await agent.delete(`/api/projects/${p2.id}/members/${userId}`).expect(204);
+    expect((await dash()).myTasks.map((x: { task: { title: string } }) => x.task.title)).not.toContain("Theirs for me");
+  });
+
+  it("needs the viewer's date and a session", async () => {
+    await ctx.agent.get("/api/dashboard").expect(400);
+    await ctx.agent.get("/api/dashboard?today=tomorrow").expect(400);
+    const db = openDatabase(":memory:");
+    await request(createApp(db)).get(`/api/dashboard?today=${today}`).expect(401);
+  });
+});

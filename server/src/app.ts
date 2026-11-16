@@ -14,6 +14,7 @@ import { authRoutes } from "./routes/auth.ts";
 import { columnRoutes } from "./routes/columns.ts";
 import { suiteRoutes } from "./routes/suites.ts";
 import { planRoutes } from "./routes/plans.ts";
+import { dashboardRoutes } from "./routes/dashboard.ts";
 import { projectActivityRoutes } from "./routes/activity.ts";
 import { projectEventRoutes } from "./routes/events.ts";
 import { labelRoutes } from "./routes/labels.ts";
@@ -80,6 +81,7 @@ export function createApp(db: DB, opts: AppOptions = {}) {
   api.use("/plans", plans.byId);
   api.use("/comments", commentRoutes(db));
   api.use("/notifications", notificationRoutes(db));
+  api.use("/dashboard", dashboardRoutes(db));
   api.use((_req, _res) => {
     throw new HttpError(404, "API route not found");
   });

@@ -165,6 +165,13 @@ main.page { padding: 20px; max-width: 1400px; margin: 0 auto; }
   .steps-edit li > textarea[data-field="expected"], .steps-edit .step-tools { grid-column: 2; }
 }
 
+/* ---------- Home dashboard ---------- */
+.home-link.active { border-color: var(--acc); color: var(--acc); }
+main.home .panel { min-width: 0; }
+.home-row { align-items: flex-start; }
+.home-sub { font-size: 12px; }
+.home-heading { margin: 20px 0 10px; font-size: 14px; }
+
 /* ---------- Coverage ---------- */
 .coverage-badge { font-size: 11px; font-weight: 600; margin-left: 6px; white-space: nowrap; }
 .task-tests { display: grid; gap: 8px; }

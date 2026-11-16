@@ -14,9 +14,12 @@ export function TopBar({ projectId }: { projectId?: string }) {
 
   return (
     <header className="topbar">
-      <Link to="/" className="brand" title="Recursive Project and Integration Tracker">
+      <Link to="/" className="brand" title="Recursive Project and Integration Tracker: go home">
         RPIT
       </Link>
+      <NavLink to="/" end className="btn sm home-link">
+        Home
+      </NavLink>
       <select
         aria-label="Project"
         value={projectId ?? ""}

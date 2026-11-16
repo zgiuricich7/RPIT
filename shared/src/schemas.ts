@@ -687,6 +687,46 @@ export interface ProjectSummary {
   commentCount: number;
 }
 
+// ---------- Home dashboard ----------
+/** One of the user's projects on the home dashboard. */
+export interface DashboardProject {
+  project: Project;
+  summary: ProjectSummary;
+  /** Open tasks due before the viewer's today. */
+  overdueCount: number;
+  /** Open tasks due today or in the next 7 days. */
+  dueSoonCount: number;
+  openPlanCount: number;
+  /** Latest activity log entry, or null if there is none. */
+  lastActivityAt: string | null;
+}
+
+export interface DashboardTask {
+  task: Task;
+  projectName: string;
+  /** The task's board column name (its status as the project names it). */
+  columnName: string | null;
+}
+
+export interface DashboardTest {
+  test: TestCase;
+  projectName: string;
+}
+
+/**
+ * `GET /api/dashboard?today=YYYY-MM-DD`: everything on the home page, across
+ * the signed-in user's projects. `today` is the viewer's local date (the
+ * server never decides what's overdue on its own).
+ */
+export interface Dashboard {
+  /** Most recently active first. */
+  projects: DashboardProject[];
+  /** Open tasks assigned to the user: overdue and dated first (by due date), then undated. */
+  myTasks: DashboardTask[];
+  /** Test cases assigned to the user that failed, are blocked or haven't been run. */
+  myTests: DashboardTest[];
+}
+
 export interface ApiError {
   error: string;
   fieldErrors?: Record<string, string[]>;

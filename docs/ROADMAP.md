@@ -101,7 +101,13 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
 
 ## 4. Dashboard
 
-4.1 **Homepage Support** Users should be routed to a homepage by default that provides a dashboard for all of their active projects. Clicking the home button in the navbar should return to the homepage
+4.1 ~~**Homepage Support**~~ Done: signing in (and `/`) opens a Home dashboard instead of the first project; the
+    navbar has a Home link (the RPIT brand goes there too). It shows "My tasks" (open tasks assigned to you in every
+    project, overdue and dated first) and "My tests" (assigned tests that failed, are blocked or not run), totals,
+    and a card per project with completion, open/overdue/due-this-week tasks, test pass rate, open test plans and
+    last activity, most recently active first. One `GET /api/dashboard?today=` call; refreshes every minute.
+    Follow-up: archive projects (so "active" can exclude them), pin favourite projects, and a recent-activity feed
+    across projects.
 
 ## 5. Platform
 

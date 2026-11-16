@@ -5,6 +5,8 @@ and test case tracking — with a per-project overview dashboard.
 
 ## Features
 
+- **Home dashboard** across all your projects: your open tasks (overdue first) and tests to run or fix, and a
+  card per project with completion, overdue and upcoming work, test pass rate and open test plans
 - **Projects**, each with its own task tree, board and test cases
 - **Project members** with owner, editor and viewer roles; invite teammates by email
 - **Unlimited subtask nesting** with progress roll-ups (measured on tasks that have no subtasks)
