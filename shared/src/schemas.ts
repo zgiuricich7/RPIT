@@ -278,7 +278,7 @@ export const NotificationPatch = z.object({ read: z.boolean() });
 export type NotificationPatch = z.infer<typeof NotificationPatch>;
 
 // ---------- Activity log ----------
-export const ACTIVITY_ENTITIES = ["project", "member", "task", "comment", "test_case", "label", "attachment", "column"] as const;
+export const ACTIVITY_ENTITIES = ["project", "member", "task", "comment", "test_case", "label", "attachment", "column", "test_run"] as const;
 export const ACTIVITY_ACTIONS = ["created", "updated", "deleted"] as const;
 export const ActivityEntity = z.enum(ACTIVITY_ENTITIES);
 export const ActivityAction = z.enum(ACTIVITY_ACTIONS);
@@ -309,6 +309,16 @@ export const TestCasePatch = z
   })
   .partial();
 export type TestCaseInput = z.input<typeof TestCaseInput>;
+/**
+ * Record a test run. The test case's status is always its latest run's; sending
+ * `status` to create or PATCH a test case (when it changes) is a shortcut that
+ * records a run without notes. "Not run" marks it for re-testing.
+ */
+export const TestRunInput = z.object({
+  status: TestStatus,
+  notes: longText.default(""),
+});
+export type TestRunInput = z.input<typeof TestRunInput>;
 export type TestCasePatch = z.infer<typeof TestCasePatch>;
 
 // ---------- Response shapes ----------
@@ -433,8 +443,24 @@ export interface TestCase {
   steps: string;
   expected: string;
   notes: string;
+  /** When the latest run was recorded; null if it has never been run. */
+  lastRunAt: string | null;
+  runCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/** One execution of a test case. The newest run sets the test case's status. */
+export interface TestRun {
+  id: string;
+  testCaseId: string;
+  status: TestStatus;
+  /** Null if their account was deleted, or for runs carried over from before run history. */
+  runById: string | null;
+  runByName: string | null;
+  /** Markdown. */
+  notes: string;
+  createdAt: string;
 }
 
 export interface Notification {

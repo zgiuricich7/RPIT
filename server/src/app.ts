@@ -66,6 +66,7 @@ export function createApp(db: DB, opts: AppOptions = {}) {
   api.use("/projects", projectRoutes(db));
   api.use("/tasks", tasks.byId);
   api.use("/tests", tests.byId);
+  api.use("/test-runs", tests.runs);
   api.use("/labels", labels.byId);
   api.use("/attachments", attachments.byId);
   api.use("/columns", columns.byId);

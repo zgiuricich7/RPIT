@@ -149,6 +149,21 @@ main.page { padding: 20px; max-width: 1400px; margin: 0 auto; }
   border: 1px solid color-mix(in srgb, var(--done) 45%, transparent); border-radius: var(--radius);
   background: color-mix(in srgb, var(--done) 8%, transparent);
 }
+/* ---------- Test runs ---------- */
+.test-runs { display: grid; gap: 10px; }
+.test-runs h3 { font-size: 14px; display: flex; align-items: center; gap: 8px; }
+.run-form { display: grid; gap: 8px; }
+.run-result { width: fit-content; flex-wrap: wrap; }
+.run-timeline { list-style: none; margin: 0; padding: 0 0 0 12px; border-left: 2px solid var(--line); display: grid; gap: 10px; }
+.run-timeline li { position: relative; padding-left: 10px; }
+.run-timeline li::before {
+  content: ""; position: absolute; left: -19px; top: 6px; width: 10px; height: 10px; border-radius: 50%;
+  background: currentColor; border: 2px solid var(--surface);
+}
+.run-timeline .line { display: flex; justify-content: space-between; gap: 10px; color: var(--ink); flex-wrap: wrap; }
+.run-timeline .md { color: var(--ink); margin-top: 4px; font-size: 13px; }
+.run-meta { display: inline-flex; gap: 10px; align-items: center; font-size: 12px; color: var(--mute); }
+
 /* ---------- Board columns editor ---------- */
 .column-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .column-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }

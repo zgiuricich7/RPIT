@@ -4,6 +4,7 @@ import { TEST_STATUSES, TEST_STATUS_LABELS, hasRole, type Project, type TestStat
 import { useTasks, useTests, useUpdateTest, useUsers } from "../api/hooks.ts";
 import { useDialogs } from "../components/dialogs.tsx";
 import { AssigneeName, Options, Stack, priorityLabel } from "../components/ui.tsx";
+import { formatDateTime } from "../lib/format.ts";
 
 export const TEST_COLORS: Record<TestStatus, string> = {
   passed: "var(--done)",
@@ -77,6 +78,7 @@ export function TestsPage() {
                 <th>Test case</th>
                 <th>Linked task</th>
                 <th>Status</th>
+                <th>Last run</th>
                 <th>Priority</th>
                 <th>Assignee</th>
               </tr>
@@ -104,12 +106,20 @@ export function TestsPage() {
                       <select
                         className={`inline s-${t.status}`}
                         value={t.status}
-                        aria-label={`Status of ${t.title}`}
+                        aria-label={`Record a run of ${t.title}`}
+                        title="Choosing a result records a run"
                         disabled={!canEdit}
                         onChange={(e) => update.mutate({ id: t.id, status: e.target.value as TestStatus })}
                       >
                         <Options labels={TEST_STATUS_LABELS} />
                       </select>
+                    </td>
+                    <td>
+                      {t.lastRunAt ? (
+                        <span title={`${t.runCount} run${t.runCount === 1 ? "" : "s"}`}>{formatDateTime(t.lastRunAt)}</span>
+                      ) : (
+                        <span className="muted">Never</span>
+                      )}
                     </td>
                     <td>{priorityLabel(t.priority)}</td>
                     <td>

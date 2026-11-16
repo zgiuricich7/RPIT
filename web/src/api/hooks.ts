@@ -30,6 +30,8 @@ import type {
   TestCase,
   TestCaseInput,
   TestCasePatch,
+  TestRun,
+  TestRunInput,
   User,
 } from "@rpit/shared";
 import { api, ApiRequestError, CLIENT_ID, uploadFile } from "./client.ts";
@@ -51,6 +53,7 @@ export const keys = {
   labels: (projectId: string) => ["project", projectId, "labels"] as const,
   attachments: (projectId: string) => ["project", projectId, "attachments"] as const,
   columns: (projectId: string) => ["project", projectId, "columns"] as const,
+  testRuns: (projectId: string, testId: string) => ["project", projectId, "test-runs", testId] as const,
   /** Under the project prefix, so every project mutation refreshes the logs too. */
   activity: (projectId: string, scope?: { task?: string; test?: string }) =>
     ["project", projectId, "activity", scope ?? {}] as const,
@@ -495,6 +498,35 @@ export function useDeleteTest(projectId: string) {
   return useMutation({
     mutationFn: (id: string) => api<void>(`/tests/${id}`, { method: "DELETE" }),
     onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+// ---------- Test runs ----------
+/** A test case's runs, newest first. Under the project prefix, so live updates refresh it. */
+export function useTestRuns(projectId: string, testId: string) {
+  return useQuery({
+    queryKey: keys.testRuns(projectId, testId),
+    queryFn: () => api<TestRun[]>(`/tests/${testId}/runs`),
+  });
+}
+
+/** Records a run; the test's status (and the project's pass rate) follow. */
+export function useRecordTestRun(projectId: string, testId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: TestRunInput) => api<TestRun>(`/tests/${testId}/runs`, { method: "POST", body: input }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+export function useDeleteTestRun(projectId: string, testId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (runId: string) => api<void>(`/test-runs/${runId}`, { method: "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.testRuns(projectId, testId) });
+      invalidateProject(qc, projectId);
+    },
   });
 }
 

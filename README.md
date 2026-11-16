@@ -21,6 +21,8 @@ and test case tracking — with a per-project overview dashboard.
   done (a per-project setting)
 - **Test cases** with steps, expected result, notes, assignee, priority and a linked task;
   dashboard with pass rate and status filters
+- **Test runs**: record each run's result with notes; the test's status is its latest run, with a run timeline
+  in the test dialog
 - **Activity log**: every change to projects, members, tasks, labels, comments and test cases is recorded
   with who, when and what changed (before and after). Shown as a project feed and per-task/test history.
   The log is append-only.

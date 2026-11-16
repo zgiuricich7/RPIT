@@ -508,14 +508,18 @@ describe("activity log", () => {
     expect(brief(items)).toEqual([
       "test_case updated T",
       "member deleted Ed",
-      "test_case updated T",
+      "test_run created T", // a status change is a run
       "test_case created T",
       "member updated Ed",
       "member created Ed",
     ]);
     expect(items.map((e) => e.actorName)).toEqual(["Ed", "Ed", "Ed", "Ed", "Tester", "Tester"]);
     expect(items[0]!.diff).toEqual({ assigneeId: { from: edId, to: null } });
-    expect(items[2]!.diff).toEqual({ status: { from: "not_run", to: "passed" } });
+    expect(items[2]!.diff).toEqual({
+      status: { from: "not_run", to: "passed" },
+      notes: { from: null, to: "" },
+      testCaseId: { from: null, to: tc.id },
+    });
     expect(items[4]!.diff).toEqual({ role: { from: "viewer", to: "editor" } });
 
     await agent.delete(`/api/tests/${tc.id}`).expect(204);
@@ -1344,5 +1348,106 @@ describe("migration 10 (board columns)", () => {
     ]);
     const ids = db.prepare(`SELECT id FROM board_columns`).all() as { id: string }[];
     expect(ids.every((r) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(r.id))).toBe(true);
+  });
+});
+
+describe("test runs (history)", () => {
+  type Run = { id: string; status: string; notes: string; runByName: string | null };
+  const mkTest = (body: Record<string, unknown> = {}) =>
+    ctx.agent.post(`/api/projects/${ctx.projectId}/tests`).send({ title: "T", ...body }).expect(201).then((r) => r.body);
+  const runs = async (id: string) => (await ctx.agent.get(`/api/tests/${id}/runs`).expect(200)).body as Run[];
+  const record = (id: string, status: string, notes?: string) =>
+    ctx.agent.post(`/api/tests/${id}/runs`).send({ status, notes });
+
+  it("records runs newest first, and the test's status is always the latest run", async () => {
+    const tc = await mkTest();
+    expect(tc).toMatchObject({ status: "not_run", runCount: 0, lastRunAt: null });
+    const first = (await record(tc.id, "failed", "Breaks on **Safari**").expect(201)).body;
+    expect(first).toMatchObject({ status: "failed", notes: "Breaks on **Safari**", runByName: "Tester", testCaseId: tc.id });
+    await record(tc.id, "passed").expect(201);
+    await record(tc.id, "passed", "Still fine").expect(201); // same result again still counts as a run
+
+    expect((await runs(tc.id)).map((r) => `${r.status}:${r.notes}`)).toEqual([
+      "passed:Still fine",
+      "passed:",
+      "failed:Breaks on **Safari**",
+    ]);
+    const now = (await ctx.agent.get(`/api/tests/${tc.id}`)).body;
+    expect(now).toMatchObject({ status: "passed", runCount: 3 });
+    expect(now.lastRunAt).toEqual(expect.any(String));
+    await record(tc.id, "nope").expect(400);
+  });
+
+  it("treats a status on create or patch as a run, but not an unchanged status", async () => {
+    const tc = await mkTest({ status: "blocked" });
+    expect(tc).toMatchObject({ status: "blocked", runCount: 1 });
+    await ctx.agent.patch(`/api/tests/${tc.id}`).send({ status: "blocked", title: "T2" }).expect(200);
+    expect(await runs(tc.id)).toHaveLength(1);
+    const res = await ctx.agent.patch(`/api/tests/${tc.id}`).send({ status: "passed" }).expect(200);
+    expect(res.body).toMatchObject({ status: "passed", runCount: 2 });
+    // "Not run" marks it for re-testing and is part of the history too.
+    await ctx.agent.patch(`/api/tests/${tc.id}`).send({ status: "not_run" }).expect(200);
+    expect((await runs(tc.id)).map((r) => r.status)).toEqual(["not_run", "passed", "blocked"]);
+    expect((await ctx.agent.get(`/api/projects/${ctx.projectId}/summary`)).body.testsByStatus.not_run).toBe(1);
+  });
+
+  it("deleting a run falls back to the previous one (or Not run), and is logged in the test's history", async () => {
+    const tc = await mkTest();
+    const a = (await record(tc.id, "passed")).body as Run;
+    const b = (await record(tc.id, "failed", "Oops, wrong test")).body as Run;
+    await ctx.agent.delete(`/api/test-runs/${b.id}`).expect(204);
+    expect((await ctx.agent.get(`/api/tests/${tc.id}`)).body.status).toBe("passed");
+    await ctx.agent.delete(`/api/test-runs/${a.id}`).expect(204);
+    expect((await ctx.agent.get(`/api/tests/${tc.id}`)).body).toMatchObject({ status: "not_run", runCount: 0 });
+    await ctx.agent.delete(`/api/test-runs/${a.id}`).expect(404);
+
+    const items = (await ctx.agent.get(`/api/tests/${tc.id}/activity`)).body.items as { entity: string; action: string; diff: Record<string, unknown> }[];
+    expect(items.map((e) => `${e.entity} ${e.action}`)).toEqual([
+      "test_run deleted",
+      "test_run deleted",
+      "test_run created",
+      "test_run created",
+      "test_case created",
+    ]);
+    expect(items[1]!.diff.status).toEqual({ from: "failed", to: "passed" });
+    expect(items[1]!.diff.notes).toEqual({ from: "Oops, wrong test", to: null });
+  });
+
+  it("lets viewers read runs but only editors record or delete them", async () => {
+    const tc = await mkTest();
+    const run = (await record(tc.id, "passed")).body as Run;
+    const viewer = await signUp(ctx.db, "Vic", "vic@x.com");
+    await ctx.agent.post(`/api/projects/${ctx.projectId}/members`).send({ email: "vic@x.com", role: "viewer" }).expect(201);
+    await viewer.get(`/api/tests/${tc.id}/runs`).expect(200);
+    await viewer.post(`/api/tests/${tc.id}/runs`).send({ status: "failed" }).expect(403);
+    await viewer.delete(`/api/test-runs/${run.id}`).expect(403);
+    const outsider = await signUp(ctx.db, "Out", "out@x.com");
+    await outsider.get(`/api/tests/${tc.id}/runs`).expect(404);
+    await outsider.delete(`/api/test-runs/${run.id}`).expect(404);
+  });
+
+  it("goes with its test case", async () => {
+    const tc = await mkTest({ status: "passed" });
+    await ctx.agent.delete(`/api/tests/${tc.id}`).expect(204);
+    expect(ctx.db.prepare(`SELECT COUNT(*) AS n FROM test_runs`).get()).toEqual({ n: 0 });
+  });
+});
+
+describe("migration 11 (test runs)", () => {
+  it("carries each existing result over as one run", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const { migrations } = await import("../src/db/migrations.ts");
+    const { migrate } = await import("../src/db/index.ts");
+    const db = new DatabaseSync(":memory:");
+    db.exec("PRAGMA foreign_keys = ON");
+    for (const m of migrations.slice(0, 10)) db.exec(m);
+    db.exec("PRAGMA user_version = 10");
+    db.exec(`INSERT INTO projects (id, name) VALUES ('p', 'P')`);
+    db.exec(`INSERT INTO test_cases (id, project_id, title, status, updated_at) VALUES
+      ('a', 'p', 'A', 'failed', '2026-01-02T00:00:00.000Z'), ('b', 'p', 'B', 'not_run', '2026-01-03T00:00:00.000Z')`);
+    migrate(db);
+    expect(db.prepare(`SELECT test_case_id, status, run_by, created_at FROM test_runs`).all()).toEqual([
+      { test_case_id: "a", status: "failed", run_by: null, created_at: "2026-01-02T00:00:00.000Z" },
+    ]);
   });
 });

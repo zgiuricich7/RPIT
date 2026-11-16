@@ -78,6 +78,11 @@ function formatValue(a: Activity, field: string, v: FieldChange["from"], l: Look
 }
 
 function Changes({ a, lookup }: { a: Activity; lookup: Lookup }) {
+  // Runs show their notes.
+  if (a.entity === "test_run") {
+    const text = a.diff.notes?.to ?? a.diff.notes?.from;
+    return text ? <p className="quote">{markdownToPlainText(String(text))}</p> : null;
+  }
   // New and deleted comments show their text; edits fall through to the before/after view.
   if (a.entity === "comment" && a.action !== "updated") {
     const text = a.diff.body?.to ?? a.diff.body?.from;
@@ -181,6 +186,21 @@ function Sentence({ a, scope, lookup }: { a: Activity; scope: ActivityScope; loo
       }
       return <>{what} {where} the project</>;
     }
+    case "test_run": {
+      const testId = a.diff.testCaseId?.to ?? a.diff.testCaseId?.from;
+      const live = testId ? lookup.tests.some((t) => t.id === testId) : false;
+      const testName = name(a.label, live ? () => dialogs.openTest(String(testId)) : undefined);
+      const result = TEST_STATUS_LABELS[(a.action === "deleted" ? a.diff.status?.from : a.diff.status?.to) as TestStatus];
+      if (a.action === "deleted") {
+        return scope === "test" ? <>deleted a {result?.toLowerCase()} run</> : <>deleted a {result?.toLowerCase()} run of {testName}</>;
+      }
+      const what = a.diff.status?.to === "not_run" ? <>marked</> : <>ran</>;
+      return scope === "test" ? (
+        <>{what} it: <b>{result}</b></>
+      ) : (
+        <>{what} test case {testName}: <b>{result}</b></>
+      );
+    }
     case "column":
       return <>{verb} board column <b>{a.label}</b></>;
     case "label":
@@ -191,7 +211,7 @@ function Sentence({ a, scope, lookup }: { a: Activity; scope: ActivityScope; loo
 }
 
 /** Create and delete entries list every field; only comment text is worth showing then. */
-const showChanges = (a: Activity) => a.action === "updated" || a.entity === "comment";
+const showChanges = (a: Activity) => a.action === "updated" || a.entity === "comment" || a.entity === "test_run";
 
 export function ActivityFeed(props: {
   projectId: string;

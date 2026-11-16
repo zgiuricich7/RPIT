@@ -379,4 +379,54 @@ export const migrations: string[] = [
   BEFORE DELETE ON activity
   BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
   `,
+
+  /* 11: test runs (history); a test case's status is its latest run */ `
+  CREATE TABLE test_runs (
+    id           TEXT PRIMARY KEY,
+    test_case_id TEXT NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
+    status       TEXT NOT NULL CHECK (status IN ('not_run','passed','failed','blocked')),
+    run_by       TEXT REFERENCES users(id) ON DELETE SET NULL,
+    notes        TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX idx_test_runs_case ON test_runs(test_case_id, created_at);
+
+  -- Tests that already have a result get one run carrying it (no runner known), dated when the
+  -- test case was last updated, so "status = latest run" holds from the start.
+  INSERT INTO test_runs (id, test_case_id, status, run_by, notes, created_at)
+  SELECT lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-'
+           || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))),
+         id, status, NULL, 'Result recorded before run history was kept.', updated_at
+  FROM test_cases WHERE status != 'not_run';
+
+  -- Recreate activity to widen the entity CHECK with 'test_run' (same steps as migration 7).
+  DROP TRIGGER activity_no_update;
+  DROP TRIGGER activity_no_delete;
+  CREATE TABLE activity_new (
+    id         TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    actor_id   TEXT REFERENCES users(id) ON DELETE SET NULL,
+    entity     TEXT NOT NULL CHECK (entity IN ('project','member','task','comment','test_case','label','attachment',
+                                               'column','test_run')),
+    entity_id  TEXT NOT NULL,
+    task_id    TEXT,
+    action     TEXT NOT NULL CHECK (action IN ('created','updated','deleted')),
+    label      TEXT NOT NULL DEFAULT '',
+    diff       TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  INSERT INTO activity_new (rowid, id, project_id, actor_id, entity, entity_id, task_id, action, label, diff, created_at)
+    SELECT rowid, id, project_id, actor_id, entity, entity_id, task_id, action, label, diff, created_at FROM activity;
+  DROP TABLE activity;
+  ALTER TABLE activity_new RENAME TO activity;
+  CREATE INDEX idx_activity_project ON activity(project_id);
+  CREATE INDEX idx_activity_task ON activity(task_id);
+  CREATE INDEX idx_activity_entity ON activity(entity, entity_id);
+  CREATE TRIGGER activity_no_update
+  BEFORE UPDATE OF id, project_id, entity, entity_id, task_id, action, label, diff, created_at ON activity
+  BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
+  CREATE TRIGGER activity_no_delete
+  BEFORE DELETE ON activity
+  BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
+  `,
 ];

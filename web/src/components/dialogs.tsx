@@ -39,6 +39,7 @@ import {
 import { formatDateTime } from "../lib/format.ts";
 import { ActivityFeed } from "./activity.tsx";
 import { Attachments } from "./attachments.tsx";
+import { TestRuns } from "./testRuns.tsx";
 import { LabelPicker } from "./labels.tsx";
 import { CommentBody, MarkdownEditor } from "./markdown.tsx";
 import { Modal, Options } from "./ui.tsx";
@@ -532,7 +533,8 @@ function TestDialog(props: { projectId: string; test: TestCase | null; tasks: Ta
     setError(null);
     const body = { ...form, assigneeId: form.assigneeId || null, taskId: form.taskId || null };
     try {
-      if (test) await update.mutateAsync({ id: test.id, ...body });
+      // An existing test's status changes only by recording a run (see Runs below).
+      if (test) await update.mutateAsync({ id: test.id, ...body, status: undefined });
       else await create.mutateAsync(body);
       onClose();
     } catch (err) {
@@ -552,12 +554,14 @@ function TestDialog(props: { projectId: string; test: TestCase | null; tasks: Ta
             <input autoFocus value={form.title} onChange={(e) => set("title", e.target.value)} required />
           </label>
           <div className="two">
-            <label className="field">
-              Status
-              <select value={form.status} onChange={(e) => set("status", e.target.value as TestStatus)}>
-                <Options labels={TEST_STATUS_LABELS} />
-              </select>
-            </label>
+            {!test && (
+              <label className="field">
+                Result so far
+                <select value={form.status} onChange={(e) => set("status", e.target.value as TestStatus)}>
+                  <Options labels={TEST_STATUS_LABELS} />
+                </select>
+              </label>
+            )}
             <label className="field">
               Priority
               <select value={form.priority} onChange={(e) => set("priority", e.target.value as Priority)}>
@@ -641,6 +645,11 @@ function TestDialog(props: { projectId: string; test: TestCase | null; tasks: Ta
           )}
         </div>
       </form>
+      {test && (
+        <div className="modal-body">
+          <TestRuns projectId={projectId} test={test} canEdit={canEdit} />
+        </div>
+      )}
       {test && (
         <div className="modal-body">
           <Attachments projectId={projectId} testCaseId={test.id} canEdit={canEdit} />

@@ -67,8 +67,12 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
 
 ## 3. Testing
 
-3.1 **Test runs/history.** `test_runs(test_case_id, status, run_by, notes, created_at)`; status on
-    the test case becomes the latest run. Show a run timeline in the test dialog.
+3.1 ~~**Test runs/history.**~~ Done: `test_runs(test_case_id, status, run_by, notes, created_at)`; a test
+    case's status is always its latest run (existing results were carried over as one run each). The test dialog
+    has a run timeline and a "Record run" form (result + Markdown notes); the Tests page shows when each test last
+    ran, and its result picker records a run. Runs can be deleted (status falls back to the previous run); all
+    of it is audited. Follow-up: notify the assignee (or linked task's assignee) when a run fails, flaky-test
+    detection from run history, and attachments on runs (screenshots); 3.4 cycles can group runs.
 3.2 **Test suites / folders** to group test cases, with per-suite pass rates.
 3.3 **Structured steps** (ordered step + expected result per step) instead of free text.
 3.4 **Test plans / cycles**: a named set of tests to execute for a release, with progress.

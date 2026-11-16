@@ -13,6 +13,7 @@ import type {
   RecentComment,
   Task,
   TestCase,
+  TestRun,
   User,
 } from "@rpit/shared";
 import { TASK_STATUSES, TEST_STATUSES, leafProgress } from "@rpit/shared";
@@ -155,9 +156,32 @@ export const toTestCase = (r: Row): TestCase => ({
   steps: r.steps as string,
   expected: r.expected as string,
   notes: r.notes as string,
+  lastRunAt: (r.last_run_at as string | null) ?? null,
+  runCount: Number(r.run_count ?? 0),
   createdAt: r.created_at as string,
   updatedAt: r.updated_at as string,
 });
+
+/** Test cases with when they were last run and how often; alias test_cases as tc. */
+export const TEST_SELECT = `
+  SELECT tc.*,
+    (SELECT MAX(r.created_at) FROM test_runs r WHERE r.test_case_id = tc.id) AS last_run_at,
+    (SELECT COUNT(*) FROM test_runs r WHERE r.test_case_id = tc.id) AS run_count
+  FROM test_cases tc`;
+
+export const toTestRun = (r: Row): TestRun => ({
+  id: r.id as string,
+  testCaseId: r.test_case_id as string,
+  status: r.status as TestRun["status"],
+  runById: (r.run_by as string | null) ?? null,
+  runByName: (r.run_by_name as string | null) ?? null,
+  notes: r.notes as string,
+  createdAt: r.created_at as string,
+});
+
+/** Runs with the runner's name, newest first when ordered by `r.created_at DESC, r.rowid DESC`. */
+export const TEST_RUN_SELECT = `
+  SELECT r.*, u.name AS run_by_name FROM test_runs r LEFT JOIN users u ON u.id = r.run_by`;
 
 /** Tasks with their comment count and label ids (as JSON, in label name order). */
 export const TASK_SELECT = `

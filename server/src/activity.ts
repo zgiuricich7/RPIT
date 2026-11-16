@@ -47,7 +47,9 @@ export const TASK_FIELDS = [
   "remindAssignee",
   "labels",
 ] as const;
-export const TEST_FIELDS = ["title", "status", "priority", "assigneeId", "taskId", "steps", "expected", "notes"] as const;
+/** No `status`: it changes only through test runs, which have their own entries (entity `test_run`). */
+export const TEST_FIELDS = ["title", "priority", "assigneeId", "taskId", "steps", "expected", "notes"] as const;
+export const TEST_RUN_FIELDS = ["status", "notes", "testCaseId"] as const;
 export const PROJECT_FIELDS = ["name", "description", "notifySubtasksDone"] as const;
 export const LABEL_FIELDS = ["name", "color"] as const;
 export const COLUMN_FIELDS = ["name", "category"] as const;

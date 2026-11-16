@@ -118,12 +118,24 @@ transaction(db, () => {
     `INSERT INTO test_cases (id, project_id, task_id, title, status, priority, assignee_id, steps, expected, notes)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
-  insertTest.run(newId(), project, id("buttons"), "Buttons render in all states", "passed", "medium", priya,
+  const buttonsTest = newId();
+  const tableTest = newId();
+  insertTest.run(buttonsTest, project, id("buttons"), "Buttons render in all states", "passed", "medium", priya,
     "1. Open the component page\n2. Cycle through hover, focus, disabled", "Each state is visually distinct", "Checked in Chrome and Safari.");
-  insertTest.run(newId(), project, id("table"), "Table sorts by column", "failed", "high", priya,
+  insertTest.run(tableTest, project, id("table"), "Table sorts by column", "failed", "high", priya,
     "1. Click the Name header", "Rows sort A to Z", "Sort order reverses on second click.");
   insertTest.run(newId(), project, id("content"), "Legacy URLs redirect", "not_run", "high", null,
     "", "301 to new path", "");
+
+  // Run history: the newest run matches each test's status.
+  const insertRun = db.prepare(
+    `INSERT INTO test_runs (id, test_case_id, status, run_by, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+  const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+  insertRun.run(newId(), buttonsTest, "failed", priya, "Focus ring missing on the secondary button.", daysAgo(4));
+  insertRun.run(newId(), buttonsTest, "passed", priya, "Checked in Chrome and Safari.", daysAgo(1));
+  insertRun.run(newId(), tableTest, "passed", maya, "", daysAgo(6));
+  insertRun.run(newId(), tableTest, "failed", priya, "Sort order reverses on the second click.", daysAgo(2));
 });
 
 console.log("Seeded demo data. Sign in with demo@rpit.dev / rpit-demo");

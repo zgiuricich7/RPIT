@@ -1,16 +1,71 @@
 import { Router } from "express";
-import { TestCaseInput, TestCasePatch, type TestCase } from "@rpit/shared";
+import { TestCaseInput, TestCasePatch, TestRunInput, type TestCase, type TestRun, type TestStatus } from "@rpit/shared";
 import type { DB } from "../db/index.ts";
 import { newId, now, transaction } from "../db/index.ts";
-import { getTask, toTestCase } from "../db/repo.ts";
+import { getTask, TEST_RUN_SELECT, TEST_SELECT, toTestCase, toTestRun } from "../db/repo.ts";
 import { HttpError, notFound, param, parseBody } from "../http.ts";
 import { currentUser } from "../auth.ts";
-import { byTestCase, requireProjectRole } from "../access.ts";
+import { byTestCase, requireProjectRole, type ProjectResolver } from "../access.ts";
 import { notifyAssignment } from "../notify.ts";
 import { changes, logActivity, snapshot, TEST_FIELDS } from "../activity.ts";
 import { activityPage } from "./activity.ts";
 import { checkAssignee } from "./tasks.ts";
 import { attachmentIds, removeFilesAfterCommit } from "../uploads.ts";
+
+const byTestRun: ProjectResolver = {
+  param: "runId",
+  what: "Test run",
+  sql: `SELECT tc.project_id FROM test_runs r JOIN test_cases tc ON tc.id = r.test_case_id WHERE r.id = ?`,
+};
+
+/**
+ * Test runs. A test case's `status` column is a cache of its newest run's
+ * status (not_run with no runs); every write to test_runs calls this.
+ */
+function syncTestStatus(db: DB, testCaseId: string) {
+  const latest = db
+    .prepare(`SELECT status FROM test_runs WHERE test_case_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`)
+    .get(testCaseId) as { status: TestStatus } | undefined;
+  db.prepare(`UPDATE test_cases SET status = ?, updated_at = ? WHERE id = ?`).run(latest?.status ?? "not_run", now(), testCaseId);
+  return latest?.status ?? "not_run";
+}
+
+/**
+ * Record a run and make it the test case's status. Call inside a transaction.
+ * Logged as entity `test_run` with the status change (from the previous status),
+ * the notes, and the test case id (so the test case's history includes it).
+ */
+export function recordTestRun(
+  db: DB,
+  t: Pick<TestCase, "id" | "projectId" | "title" | "status">,
+  run: { status: TestStatus; notes: string },
+  actorId: string,
+): string {
+  const id = newId();
+  db.prepare(`INSERT INTO test_runs (id, test_case_id, status, run_by, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)`).run(
+    id,
+    t.id,
+    run.status,
+    actorId,
+    run.notes,
+    now(),
+  );
+  syncTestStatus(db, t.id);
+  logActivity(db, {
+    projectId: t.projectId,
+    actorId,
+    entity: "test_run",
+    entityId: id,
+    action: "created",
+    label: t.title,
+    diff: {
+      status: { from: t.status, to: run.status },
+      notes: { from: null, to: run.notes },
+      testCaseId: { from: null, to: t.id },
+    },
+  });
+  return id;
+}
 
 const testEntry = (t: TestCase) => ({
   projectId: t.projectId,
@@ -27,7 +82,7 @@ export function testCaseRoutes(db: DB) {
   const can = requireProjectRole(db);
 
   const get = (id: string) => {
-    const row = db.prepare(`SELECT * FROM test_cases WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+    const row = db.prepare(`${TEST_SELECT} WHERE tc.id = ?`).get(id) as Record<string, unknown> | undefined;
     if (!row) throw notFound("Test case");
     return toTestCase(row);
   };
@@ -39,7 +94,7 @@ export function testCaseRoutes(db: DB) {
 
   byProject.get("/", can("viewer"), (req, res) => {
     const rows = db
-      .prepare(`SELECT * FROM test_cases WHERE project_id = ? ORDER BY created_at`)
+      .prepare(`${TEST_SELECT} WHERE tc.project_id = ? ORDER BY tc.created_at`)
       .all(param(req, "projectId")) as Record<string, unknown>[];
     res.json(rows.map(toTestCase));
   });
@@ -60,15 +115,20 @@ export function testCaseRoutes(db: DB) {
         projectId,
         input.taskId,
         input.title,
-        input.status,
+        "not_run",
         input.priority,
         input.assigneeId,
         input.steps,
         input.expected,
         input.notes,
       );
-      const t = get(id);
+      let t = get(id);
       logActivity(db, { ...testEntry(t), actorId, action: "created", diff: snapshot(t, TEST_FIELDS, "created") });
+      // Created with a result: that's its first run.
+      if (input.status !== "not_run") {
+        recordTestRun(db, t, { status: input.status, notes: "" }, actorId);
+        t = get(id);
+      }
       notifyAssignment(db, { kind: "test_assigned", actorId, projectId, id }, null, input.assigneeId);
       return t;
     });
@@ -80,14 +140,14 @@ export function testCaseRoutes(db: DB) {
   });
 
   byId.get("/:testId/activity", can("viewer", byTestCase), (req, res) => {
-    // Its own changes plus files attached to it (attachment entries record the test case id in their diff).
+    // Its own changes plus its runs and files (those entries record the test case id in their diff).
     const id = param(req, "testId");
     res.json(
       activityPage(
         db,
         req,
         `(a.entity = 'test_case' AND a.entity_id = ?)
-         OR (a.entity = 'attachment' AND ? IN (json_extract(a.diff, '$.testCaseId.to'), json_extract(a.diff, '$.testCaseId.from')))`,
+         OR (a.entity IN ('attachment', 'test_run') AND ? IN (json_extract(a.diff, '$.testCaseId.to'), json_extract(a.diff, '$.testCaseId.from')))`,
         [id, id],
       ),
     );
@@ -103,11 +163,16 @@ export function testCaseRoutes(db: DB) {
     const m = { ...cur, ...p };
     const updated = transaction(db, () => {
       db.prepare(
-        `UPDATE test_cases SET task_id = ?, title = ?, status = ?, priority = ?, assignee_id = ?,
+        `UPDATE test_cases SET task_id = ?, title = ?, priority = ?, assignee_id = ?,
            steps = ?, expected = ?, notes = ?, updated_at = ? WHERE id = ?`,
-      ).run(m.taskId, m.title, m.status, m.priority, m.assigneeId, m.steps, m.expected, m.notes, now(), id);
-      const t = get(id);
+      ).run(m.taskId, m.title, m.priority, m.assigneeId, m.steps, m.expected, m.notes, now(), id);
+      let t = get(id);
       logActivity(db, { ...testEntry(t), actorId, action: "updated", diff: changes(cur, t, TEST_FIELDS) });
+      // Shortcut (e.g. the result picker in the list): a changed status is recorded as a run.
+      if (p.status !== undefined && p.status !== cur.status) {
+        recordTestRun(db, t, { status: p.status, notes: "" }, actorId);
+        t = get(id);
+      }
       notifyAssignment(db, { kind: "test_assigned", actorId, projectId: cur.projectId, id }, cur.assigneeId, m.assigneeId);
       return t;
     });
@@ -125,5 +190,53 @@ export function testCaseRoutes(db: DB) {
     res.status(204).end();
   });
 
-  return { byProject, byId };
+  // ----- Runs -----
+  /** Newest first. */
+  byId.get("/:testId/runs", can("viewer", byTestCase), (req, res) => {
+    const rows = db
+      .prepare(`${TEST_RUN_SELECT} WHERE r.test_case_id = ? ORDER BY r.created_at DESC, r.rowid DESC`)
+      .all(param(req, "testId")) as Record<string, unknown>[];
+    res.json(rows.map(toTestRun));
+  });
+
+  byId.post("/:testId/runs", can("editor", byTestCase), (req, res) => {
+    const t = get(param(req, "testId"));
+    const run = parseBody(TestRunInput, req.body);
+    const id = transaction(db, () => recordTestRun(db, t, run, currentUser(req).id));
+    res.status(201).json(getRun(id));
+  });
+
+  const getRun = (id: string): TestRun => {
+    const row = db.prepare(`${TEST_RUN_SELECT} WHERE r.id = ?`).get(id) as Record<string, unknown> | undefined;
+    if (!row) throw notFound("Test run");
+    return toTestRun(row);
+  };
+
+  /** Mounted at /api/test-runs. Deleting a run (e.g. recorded by mistake) falls back to the previous one. */
+  const runs = Router();
+  runs.delete("/:runId", can("editor", byTestRun), (req, res) => {
+    const run = getRun(param(req, "runId"));
+    const t = get(run.testCaseId);
+    const actorId = currentUser(req).id;
+    transaction(db, () => {
+      db.prepare(`DELETE FROM test_runs WHERE id = ?`).run(run.id);
+      const status = syncTestStatus(db, t.id);
+      logActivity(db, {
+        projectId: t.projectId,
+        actorId,
+        entity: "test_run",
+        entityId: run.id,
+        action: "deleted",
+        label: t.title,
+        diff: {
+          status: { from: t.status, to: status },
+          notes: { from: run.notes, to: null },
+          testCaseId: { from: t.id, to: null },
+        },
+      });
+    });
+    res.status(204).end();
+  });
+
+  return { byProject, byId, runs };
 }

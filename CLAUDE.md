@@ -59,6 +59,7 @@ web/      React 19 + Vite + TanStack Query + React Router 7
   src/components/activity.tsx  ActivityFeed: renders log entries as sentences + field changes
   src/components/attachments.tsx  Attachments: file list + upload/drop for a task, test case or the project
   src/components/columns.tsx      ColumnsDialog: owners add/rename/recategorise/reorder/delete board columns
+  src/components/testRuns.tsx     TestRuns: run timeline + "Record run" form in the test dialog
   src/components/labels.tsx    LabelPicker (toggle chips + create) for the task dialog; LabelChip/TaskLabels are in ui.tsx
   src/pages/          Overview, Tasks (List + Board; filters and sort in the URL), Tests, Labels, Members, Inbox, Auth
   src/components/TaskFilters.tsx  search box ("/" focuses it) + assignee/priority/status/label/due filter menus
@@ -97,6 +98,12 @@ docs/ROADMAP.md       prioritised backlog
   bytes live in the uploads folder (`UPLOADS_DIR`, default `uploads/` next to the database), named by attachment id.
 - `comments.task_id → tasks.id` (cascade), `comments.author_id → users.id`; `edited_at` is set when the author edits
 - `test_cases.task_id → tasks.id` (`ON DELETE SET NULL`) — deleting a task unlinks tests, never deletes them.
+- `test_runs(test_case_id, status, run_by, notes, created_at)` — run history (cascades from the test case,
+  `run_by` SET NULL). **`test_cases.status` is a cache of the newest run's status** (`not_run` with no runs),
+  maintained by `recordTestRun` / `syncTestStatus` in `server/src/routes/tests.ts`; every write to `test_runs`
+  goes through them. Record runs with `POST /api/tests/:id/runs`; a `status` sent to create or PATCH a test case
+  (when it changes) is a shortcut that records a run. Runs may be `not_run` ("needs re-testing"). Deleting a run
+  (`DELETE /api/test-runs/:id`, editors) falls back to the previous one. Test cases expose `lastRunAt`/`runCount`.
 - `assignee_id` columns reference `users` with `SET NULL`.
 - `comment_mentions(comment_id, user_id)` — who a comment @-mentioned, computed once when it's posted.
 - `notifications(user_id, actor_id, project_id, kind, task_id, test_case_id, comment_id, read_at)` — one row
@@ -176,7 +183,8 @@ docs/ROADMAP.md       prioritised backlog
   tasks when a label is deleted). Task diffs go through `auditedTask(db, task)`, which adds `labels` as the
   joined label names and replaces `status` with the column's name, so history keeps the names as they were
   (entries from before custom columns hold the status key; the feed shows both). New tracked fields
-  go in `TASK_FIELDS` / `TEST_FIELDS` / `PROJECT_FIELDS` / `LABEL_FIELDS` / `COLUMN_FIELDS`, plus a label in `web/src/components/activity.tsx`.
+  go in `TASK_FIELDS` / `TEST_FIELDS` / `PROJECT_FIELDS` / `LABEL_FIELDS` / `COLUMN_FIELDS`
+  (test status isn't in `TEST_FIELDS`: it's logged as `test_run` entries, which carry `testCaseId` in the diff), plus a label in `web/src/components/activity.tsx`.
   Adding an entity or action type needs a new migration that recreates the CHECK.
 - **Notifications are in-app only** (no email). Create them with `notify` / `notifyAssignment` /
   `recordCommentActivity` from `server/src/notify.ts` after a write; they skip the actor and non-members.
