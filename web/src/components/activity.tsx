@@ -17,9 +17,10 @@ import {
   type TaskStatus,
   type TestCase,
   type TestStatus,
+  type TestSuite,
   type User,
 } from "@rpit/shared";
-import { useTasks, useTests, useUsers } from "../api/hooks.ts";
+import { useSuites, useTasks, useTests, useUsers } from "../api/hooks.ts";
 import { formatDate, formatDateTime } from "../lib/format.ts";
 import { useDialogs } from "./dialogs.tsx";
 
@@ -40,6 +41,7 @@ const FIELD_LABELS: Record<string, string> = {
   labels: "Labels",
   notifySubtasksDone: "Prompt when subtasks are done",
   category: "Counts as",
+  suiteId: "Suite",
   color: "Colour",
   taskId: "Linked task",
   steps: "Steps",
@@ -55,11 +57,16 @@ interface Lookup {
   users: User[];
   tasks: Task[];
   tests: TestCase[];
+  suites: TestSuite[];
 }
 
 function formatValue(a: Activity, field: string, v: FieldChange["from"], l: Lookup): string {
   if (field === "assigneeId") return v ? (l.users.find((u) => u.id === v)?.name ?? "a former user") : "Unassigned";
+  if (field === "parentId" && a.entity === "test_suite") {
+    return v ? (l.suites.find((s) => s.id === v)?.name ?? "a deleted suite") : "Top level";
+  }
   if (field === "parentId") return v ? (l.tasks.find((t) => t.id === v)?.title ?? "a deleted task") : "Top level";
+  if (field === "suiteId") return v ? (l.suites.find((s) => s.id === v)?.name ?? "a deleted suite") : "None";
   if (field === "taskId") return v ? (l.tasks.find((t) => t.id === v)?.title ?? "a deleted task") : "None";
   if (field === "startDate" || field === "dueDate") return v ? formatDate(String(v)) : "None";
   if (field === "remindAssignee" || field === "notifySubtasksDone") return v ? "On" : "Off";
@@ -201,6 +208,8 @@ function Sentence({ a, scope, lookup }: { a: Activity; scope: ActivityScope; loo
         <>{what} test case {testName}: <b>{result}</b></>
       );
     }
+    case "test_suite":
+      return <>{verb} test suite <b>{a.label}</b></>;
     case "column":
       return <>{verb} board column <b>{a.label}</b></>;
     case "label":
@@ -224,6 +233,7 @@ export function ActivityFeed(props: {
     users: useUsers().data ?? [],
     tasks: useTasks(props.projectId).data ?? [],
     tests: useTests(props.projectId).data ?? [],
+    suites: useSuites(props.projectId).data ?? [],
   };
   const items = query.data?.pages.flatMap((p) => p.items) ?? [];
 

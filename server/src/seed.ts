@@ -127,6 +127,19 @@ transaction(db, () => {
   insertTest.run(newId(), project, id("content"), "Legacy URLs redirect", "not_run", "high", null,
     "", "301 to new path", "");
 
+  // Suites: Components (with a nested Data display suite) and Content migration.
+  const insertSuite = db.prepare(`INSERT INTO test_suites (id, project_id, parent_id, name, description) VALUES (?, ?, ?, ?, ?)`);
+  const components = newId();
+  const dataDisplay = newId();
+  const migration = newId();
+  insertSuite.run(components, project, null, "Components", "Checks for the shared component library.");
+  insertSuite.run(dataDisplay, project, components, "Data display", "");
+  insertSuite.run(migration, project, null, "Content migration", "");
+  const fileTest = db.prepare(`UPDATE test_cases SET suite_id = ? WHERE id = ?`);
+  fileTest.run(components, buttonsTest);
+  fileTest.run(dataDisplay, tableTest);
+  db.prepare(`UPDATE test_cases SET suite_id = ? WHERE project_id = ? AND title = 'Legacy URLs redirect'`).run(migration, project);
+
   // Run history: the newest run matches each test's status.
   const insertRun = db.prepare(
     `INSERT INTO test_runs (id, test_case_id, status, run_by, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)`,

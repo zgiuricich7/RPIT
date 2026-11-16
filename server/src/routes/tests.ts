@@ -10,6 +10,7 @@ import { notifyAssignment } from "../notify.ts";
 import { changes, logActivity, snapshot, TEST_FIELDS } from "../activity.ts";
 import { activityPage } from "./activity.ts";
 import { checkAssignee } from "./tasks.ts";
+import { checkSuite } from "./suites.ts";
 import { attachmentIds, removeFilesAfterCommit } from "../uploads.ts";
 
 const byTestRun: ProjectResolver = {
@@ -104,16 +105,18 @@ export function testCaseRoutes(db: DB) {
     const actorId = currentUser(req).id;
     const input = parseBody(TestCaseInput, req.body);
     checkTask(projectId, input.taskId);
+    checkSuite(db, projectId, input.suiteId);
     checkAssignee(db, projectId, input.assigneeId);
     const id = newId();
     const created = transaction(db, () => {
       db.prepare(
-        `INSERT INTO test_cases (id, project_id, task_id, title, status, priority, assignee_id, steps, expected, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO test_cases (id, project_id, task_id, suite_id, title, status, priority, assignee_id, steps, expected, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         projectId,
         input.taskId,
+        input.suiteId,
         input.title,
         "not_run",
         input.priority,
@@ -159,13 +162,14 @@ export function testCaseRoutes(db: DB) {
     const cur = get(id);
     const p = parseBody(TestCasePatch, req.body);
     checkTask(cur.projectId, p.taskId);
+    if (p.suiteId !== undefined && p.suiteId !== cur.suiteId) checkSuite(db, cur.projectId, p.suiteId);
     if (p.assigneeId !== undefined && p.assigneeId !== cur.assigneeId) checkAssignee(db, cur.projectId, p.assigneeId);
     const m = { ...cur, ...p };
     const updated = transaction(db, () => {
       db.prepare(
-        `UPDATE test_cases SET task_id = ?, title = ?, priority = ?, assignee_id = ?,
+        `UPDATE test_cases SET task_id = ?, suite_id = ?, title = ?, priority = ?, assignee_id = ?,
            steps = ?, expected = ?, notes = ?, updated_at = ? WHERE id = ?`,
-      ).run(m.taskId, m.title, m.priority, m.assigneeId, m.steps, m.expected, m.notes, now(), id);
+      ).run(m.taskId, m.suiteId, m.title, m.priority, m.assigneeId, m.steps, m.expected, m.notes, now(), id);
       let t = get(id);
       logActivity(db, { ...testEntry(t), actorId, action: "updated", diff: changes(cur, t, TEST_FIELDS) });
       // Shortcut (e.g. the result picker in the list): a changed status is recorded as a run.

@@ -14,6 +14,7 @@ import type {
   Task,
   TestCase,
   TestRun,
+  TestSuite,
   User,
 } from "@rpit/shared";
 import { TASK_STATUSES, TEST_STATUSES, leafProgress } from "@rpit/shared";
@@ -149,6 +150,7 @@ export const toTestCase = (r: Row): TestCase => ({
   id: r.id as string,
   projectId: r.project_id as string,
   taskId: (r.task_id as string | null) ?? null,
+  suiteId: (r.suite_id as string | null) ?? null,
   title: r.title as string,
   status: r.status as TestCase["status"],
   priority: r.priority as TestCase["priority"],
@@ -168,6 +170,16 @@ export const TEST_SELECT = `
     (SELECT MAX(r.created_at) FROM test_runs r WHERE r.test_case_id = tc.id) AS last_run_at,
     (SELECT COUNT(*) FROM test_runs r WHERE r.test_case_id = tc.id) AS run_count
   FROM test_cases tc`;
+
+export const toTestSuite = (r: Row): TestSuite => ({
+  id: r.id as string,
+  projectId: r.project_id as string,
+  parentId: (r.parent_id as string | null) ?? null,
+  name: r.name as string,
+  description: r.description as string,
+  createdAt: r.created_at as string,
+  updatedAt: r.updated_at as string,
+});
 
 export const toTestRun = (r: Row): TestRun => ({
   id: r.id as string,

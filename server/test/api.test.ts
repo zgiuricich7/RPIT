@@ -1451,3 +1451,91 @@ describe("migration 11 (test runs)", () => {
     ]);
   });
 });
+
+describe("test suites", () => {
+  type Suite = { id: string; name: string; parentId: string | null; description: string };
+  const mkSuite = (body: Record<string, unknown>) =>
+    ctx.agent.post(`/api/projects/${ctx.projectId}/suites`).send(body).expect(201).then((r) => r.body as Suite);
+  const mkTest = (body: Record<string, unknown>) =>
+    ctx.agent.post(`/api/projects/${ctx.projectId}/tests`).send({ title: "T", ...body }).expect(201).then((r) => r.body);
+  const suites = async () => (await ctx.agent.get(`/api/projects/${ctx.projectId}/suites`).expect(200)).body as Suite[];
+
+  it("creates nested suites, lists them by name and files tests in them", async () => {
+    const co = await mkSuite({ name: "Checkout", description: "Paying for things" });
+    const pay = await mkSuite({ name: "payments", parentId: co.id });
+    await mkSuite({ name: "Auth" });
+    expect((await suites()).map((s) => s.name)).toEqual(["Auth", "Checkout", "payments"]);
+    expect(pay.parentId).toBe(co.id);
+
+    const tc = await mkTest({ suiteId: pay.id });
+    expect(tc.suiteId).toBe(pay.id);
+    const moved = (await ctx.agent.patch(`/api/tests/${tc.id}`).send({ suiteId: co.id }).expect(200)).body;
+    expect(moved.suiteId).toBe(co.id);
+    expect((await ctx.agent.patch(`/api/tests/${tc.id}`).send({ suiteId: null }).expect(200)).body.suiteId).toBeNull();
+
+    const items = (await ctx.agent.get(`/api/tests/${tc.id}/activity`)).body.items;
+    expect(items[0].diff).toEqual({ suiteId: { from: co.id, to: null } });
+  });
+
+  it("rejects suites from other projects and moves that would create a cycle", async () => {
+    const a = await mkSuite({ name: "A" });
+    const b = await mkSuite({ name: "B", parentId: a.id });
+    const c = await mkSuite({ name: "C", parentId: b.id });
+    await ctx.agent.patch(`/api/suites/${a.id}`).send({ parentId: c.id }).expect(400);
+    await ctx.agent.patch(`/api/suites/${a.id}`).send({ parentId: a.id }).expect(400);
+    await ctx.agent.patch(`/api/suites/${c.id}`).send({ parentId: null, name: "C2" }).expect(200);
+
+    const other = (await ctx.agent.post("/api/projects").send({ name: "P2" })).body;
+    const foreign = (await ctx.agent.post(`/api/projects/${other.id}/suites`).send({ name: "F" }).expect(201)).body;
+    await ctx.agent.post(`/api/projects/${ctx.projectId}/suites`).send({ name: "X", parentId: foreign.id }).expect(400);
+    await ctx.agent.patch(`/api/suites/${a.id}`).send({ parentId: foreign.id }).expect(400);
+    await ctx.agent.post(`/api/projects/${ctx.projectId}/tests`).send({ title: "X", suiteId: foreign.id }).expect(400);
+    await ctx.agent.post(`/api/projects/${ctx.projectId}/suites`).send({ name: "  " }).expect(400);
+  });
+
+  it("deletes a suite without deleting tests: its tests and sub-suites move up, and each move is logged", async () => {
+    const top = await mkSuite({ name: "Top" });
+    const mid = await mkSuite({ name: "Mid", parentId: top.id });
+    const leaf = await mkSuite({ name: "Leaf", parentId: mid.id });
+    const t1 = await mkTest({ title: "In mid", suiteId: mid.id });
+    const t2 = await mkTest({ title: "In leaf", suiteId: leaf.id });
+
+    await ctx.agent.delete(`/api/suites/${mid.id}`).expect(204);
+    expect((await ctx.agent.get(`/api/tests/${t1.id}`)).body.suiteId).toBe(top.id);
+    expect((await ctx.agent.get(`/api/tests/${t2.id}`)).body.suiteId).toBe(leaf.id);
+    expect((await suites()).find((s) => s.id === leaf.id)!.parentId).toBe(top.id);
+
+    await ctx.agent.delete(`/api/suites/${top.id}`).expect(204);
+    expect((await ctx.agent.get(`/api/tests/${t1.id}`)).body.suiteId).toBeNull();
+    expect((await suites()).map((s) => `${s.name}:${s.parentId}`)).toEqual(["Leaf:null"]);
+
+    const log = (await ctx.agent.get(`/api/projects/${ctx.projectId}/activity`)).body.items as { entity: string; action: string; label: string }[];
+    expect(log.slice(0, 6).map((e) => `${e.entity} ${e.action} ${e.label}`)).toEqual([
+      "test_suite deleted Top",
+      "test_case updated In mid",
+      "test_suite updated Leaf",
+      "test_suite deleted Mid",
+      "test_case updated In mid",
+      "test_suite updated Leaf",
+    ]);
+  });
+
+  it("lets viewers read suites but only editors change them; outsiders get 404", async () => {
+    const s = await mkSuite({ name: "S" });
+    const viewer = await signUp(ctx.db, "Vic", "vic@x.com");
+    await ctx.agent.post(`/api/projects/${ctx.projectId}/members`).send({ email: "vic@x.com", role: "viewer" }).expect(201);
+    await viewer.get(`/api/projects/${ctx.projectId}/suites`).expect(200);
+    await viewer.post(`/api/projects/${ctx.projectId}/suites`).send({ name: "N" }).expect(403);
+    await viewer.patch(`/api/suites/${s.id}`).send({ name: "N" }).expect(403);
+    await viewer.delete(`/api/suites/${s.id}`).expect(403);
+    const outsider = await signUp(ctx.db, "Out", "out@x.com");
+    await outsider.patch(`/api/suites/${s.id}`).send({ name: "N" }).expect(404);
+  });
+
+  it("goes with its project", async () => {
+    const s = await mkSuite({ name: "S" });
+    await mkTest({ suiteId: s.id });
+    await ctx.agent.delete(`/api/projects/${ctx.projectId}`).expect(204);
+    expect(ctx.db.prepare(`SELECT COUNT(*) AS n FROM test_suites`).get()).toEqual({ n: 0 });
+  });
+});

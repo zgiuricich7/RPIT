@@ -12,6 +12,7 @@ import { setUploadsDir } from "./uploads.ts";
 import { attachmentRoutes } from "./routes/attachments.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { columnRoutes } from "./routes/columns.ts";
+import { suiteRoutes } from "./routes/suites.ts";
 import { projectActivityRoutes } from "./routes/activity.ts";
 import { projectEventRoutes } from "./routes/events.ts";
 import { labelRoutes } from "./routes/labels.ts";
@@ -55,11 +56,13 @@ export function createApp(db: DB, opts: AppOptions = {}) {
   const labels = labelRoutes(db);
   const attachments = attachmentRoutes(db);
   const columns = columnRoutes(db);
+  const suites = suiteRoutes(db);
   api.use("/projects/:projectId/tasks", tasks.byProject);
   api.use("/projects/:projectId/tests", tests.byProject);
   api.use("/projects/:projectId/labels", labels.byProject);
   api.use("/projects/:projectId/attachments", attachments.byProject);
   api.use("/projects/:projectId/columns", columns.byProject);
+  api.use("/projects/:projectId/suites", suites.byProject);
   api.use("/projects/:projectId/members", memberRoutes(db));
   api.use("/projects/:projectId/activity", projectActivityRoutes(db));
   api.use("/projects/:projectId/events", projectEventRoutes(db));
@@ -70,6 +73,7 @@ export function createApp(db: DB, opts: AppOptions = {}) {
   api.use("/labels", labels.byId);
   api.use("/attachments", attachments.byId);
   api.use("/columns", columns.byId);
+  api.use("/suites", suites.byId);
   api.use("/comments", commentRoutes(db));
   api.use("/notifications", notificationRoutes(db));
   api.use((_req, _res) => {

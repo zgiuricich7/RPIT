@@ -429,4 +429,52 @@ export const migrations: string[] = [
   BEFORE DELETE ON activity
   BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
   `,
+
+  /* 12: test suites (nestable folders of test cases) */ `
+  CREATE TABLE test_suites (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    -- The delete route moves sub-suites up first; SET NULL is only a safety net.
+    parent_id   TEXT REFERENCES test_suites(id) ON DELETE SET NULL,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX idx_suites_project ON test_suites(project_id);
+  CREATE INDEX idx_suites_parent ON test_suites(parent_id);
+
+  ALTER TABLE test_cases ADD COLUMN suite_id TEXT REFERENCES test_suites(id) ON DELETE SET NULL;
+  CREATE INDEX idx_tests_suite ON test_cases(suite_id);
+
+  -- Recreate activity to widen the entity CHECK with 'test_suite' (same steps as migration 7).
+  DROP TRIGGER activity_no_update;
+  DROP TRIGGER activity_no_delete;
+  CREATE TABLE activity_new (
+    id         TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    actor_id   TEXT REFERENCES users(id) ON DELETE SET NULL,
+    entity     TEXT NOT NULL CHECK (entity IN ('project','member','task','comment','test_case','label','attachment',
+                                               'column','test_run','test_suite')),
+    entity_id  TEXT NOT NULL,
+    task_id    TEXT,
+    action     TEXT NOT NULL CHECK (action IN ('created','updated','deleted')),
+    label      TEXT NOT NULL DEFAULT '',
+    diff       TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  INSERT INTO activity_new (rowid, id, project_id, actor_id, entity, entity_id, task_id, action, label, diff, created_at)
+    SELECT rowid, id, project_id, actor_id, entity, entity_id, task_id, action, label, diff, created_at FROM activity;
+  DROP TABLE activity;
+  ALTER TABLE activity_new RENAME TO activity;
+  CREATE INDEX idx_activity_project ON activity(project_id);
+  CREATE INDEX idx_activity_task ON activity(task_id);
+  CREATE INDEX idx_activity_entity ON activity(entity, entity_id);
+  CREATE TRIGGER activity_no_update
+  BEFORE UPDATE OF id, project_id, entity, entity_id, task_id, action, label, diff, created_at ON activity
+  BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
+  CREATE TRIGGER activity_no_delete
+  BEFORE DELETE ON activity
+  BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
+  `,
 ];

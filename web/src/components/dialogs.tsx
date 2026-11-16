@@ -28,6 +28,7 @@ import {
   usePostComment,
   useMembers,
   useProjectRole,
+  useSuites,
   useTaskActivity,
   useTasks,
   useTestActivity,
@@ -40,6 +41,7 @@ import { formatDateTime } from "../lib/format.ts";
 import { ActivityFeed } from "./activity.tsx";
 import { Attachments } from "./attachments.tsx";
 import { TestRuns } from "./testRuns.tsx";
+import { SuiteOptions } from "./suites.tsx";
 import { LabelPicker } from "./labels.tsx";
 import { CommentBody, MarkdownEditor } from "./markdown.tsx";
 import { Modal, Options } from "./ui.tsx";
@@ -96,7 +98,18 @@ export function DialogHost({ projectId }: { projectId: string }) {
   if (testParam && tests && tasks) {
     const test = testParam === "new" ? null : tests.find((t) => t.id === testParam);
     if (test === undefined) return null;
-    return <TestDialog key={testParam} projectId={projectId} test={test} tasks={tasks} onClose={close} />;
+    // A new test goes in the suite selected on the Tests page (?suite=<id>).
+    const suite = sp.get("suite");
+    return (
+      <TestDialog
+        key={testParam}
+        projectId={projectId}
+        test={test}
+        tasks={tasks}
+        defaultSuiteId={suite && suite !== "none" ? suite : null}
+        onClose={close}
+      />
+    );
   }
   return null;
 }
@@ -508,9 +521,16 @@ function TestHistory({ projectId, testId }: { projectId: string; testId: string 
 
 // ---------------------------------------------------------------------------
 
-function TestDialog(props: { projectId: string; test: TestCase | null; tasks: Task[]; onClose: () => void }) {
+function TestDialog(props: {
+  projectId: string;
+  test: TestCase | null;
+  tasks: Task[];
+  defaultSuiteId: string | null;
+  onClose: () => void;
+}) {
   const { projectId, test, tasks, onClose } = props;
   const members = useMembers(projectId).data ?? [];
+  const suites = useSuites(projectId).data ?? [];
   const { canEdit } = useProjectRole(projectId);
   const create = useCreateTest(projectId);
   const update = useUpdateTest(projectId);
@@ -521,6 +541,7 @@ function TestDialog(props: { projectId: string; test: TestCase | null; tasks: Ta
     priority: test?.priority ?? ("medium" as Priority),
     assigneeId: test?.assigneeId ?? "",
     taskId: test?.taskId ?? "",
+    suiteId: test?.suiteId ?? (props.defaultSuiteId && suites.some((s) => s.id === props.defaultSuiteId) ? props.defaultSuiteId : ""),
     steps: test?.steps ?? "",
     expected: test?.expected ?? "",
     notes: test?.notes ?? "",
@@ -531,7 +552,7 @@ function TestDialog(props: { projectId: string; test: TestCase | null; tasks: Ta
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    const body = { ...form, assigneeId: form.assigneeId || null, taskId: form.taskId || null };
+    const body = { ...form, assigneeId: form.assigneeId || null, taskId: form.taskId || null, suiteId: form.suiteId || null };
     try {
       // An existing test's status changes only by recording a run (see Runs below).
       if (test) await update.mutateAsync({ id: test.id, ...body, status: undefined });
@@ -566,6 +587,13 @@ function TestDialog(props: { projectId: string; test: TestCase | null; tasks: Ta
               Priority
               <select value={form.priority} onChange={(e) => set("priority", e.target.value as Priority)}>
                 <Options labels={PRIORITY_LABELS} />
+              </select>
+            </label>
+            <label className="field">
+              Suite
+              <select value={form.suiteId} onChange={(e) => set("suiteId", e.target.value)}>
+                <option value="">Not in a suite</option>
+                <SuiteOptions suites={suites} />
               </select>
             </label>
           </div>

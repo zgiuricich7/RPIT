@@ -278,16 +278,30 @@ export const NotificationPatch = z.object({ read: z.boolean() });
 export type NotificationPatch = z.infer<typeof NotificationPatch>;
 
 // ---------- Activity log ----------
-export const ACTIVITY_ENTITIES = ["project", "member", "task", "comment", "test_case", "label", "attachment", "column", "test_run"] as const;
+export const ACTIVITY_ENTITIES = ["project", "member", "task", "comment", "test_case", "label", "attachment", "column", "test_run",
+  "test_suite"] as const;
 export const ACTIVITY_ACTIONS = ["created", "updated", "deleted"] as const;
 export const ActivityEntity = z.enum(ACTIVITY_ENTITIES);
 export const ActivityAction = z.enum(ACTIVITY_ACTIONS);
 export type ActivityEntity = z.infer<typeof ActivityEntity>;
 export type ActivityAction = z.infer<typeof ActivityAction>;
 
+// ---------- Test suites ----------
+/** Folders for test cases; nest with `parentId` (null for top level). */
+const suiteName = z.string().trim().min(1, "Name is required").max(120);
+export const TestSuiteInput = z.object({
+  name: suiteName,
+  description: longText.default(""),
+  parentId: nullableId.default(null),
+});
+export const TestSuitePatch = z.object({ name: suiteName, description: longText, parentId: nullableId }).partial();
+export type TestSuiteInput = z.input<typeof TestSuiteInput>;
+export type TestSuitePatch = z.infer<typeof TestSuitePatch>;
+
 // ---------- Test cases ----------
 export const TestCaseInput = z.object({
   title,
+  suiteId: nullableId.default(null),
   status: TestStatus.default("not_run"),
   priority: Priority.default("medium"),
   assigneeId: nullableId.default(null),
@@ -299,6 +313,7 @@ export const TestCaseInput = z.object({
 export const TestCasePatch = z
   .object({
     title,
+    suiteId: nullableId,
     status: TestStatus,
     priority: Priority,
     assigneeId: nullableId,
@@ -436,6 +451,8 @@ export interface TestCase {
   id: string;
   projectId: string;
   taskId: string | null;
+  /** The suite (folder) it's filed in; null when unfiled. */
+  suiteId: string | null;
   title: string;
   status: TestStatus;
   priority: Priority;
@@ -446,6 +463,18 @@ export interface TestCase {
   /** When the latest run was recorded; null if it has never been run. */
   lastRunAt: string | null;
   runCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A folder of test cases, possibly inside another suite. */
+export interface TestSuite {
+  id: string;
+  projectId: string;
+  parentId: string | null;
+  name: string;
+  /** Markdown. */
+  description: string;
   createdAt: string;
   updatedAt: string;
 }

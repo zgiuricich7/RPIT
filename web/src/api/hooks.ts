@@ -32,6 +32,9 @@ import type {
   TestCasePatch,
   TestRun,
   TestRunInput,
+  TestSuite,
+  TestSuiteInput,
+  TestSuitePatch,
   User,
 } from "@rpit/shared";
 import { api, ApiRequestError, CLIENT_ID, uploadFile } from "./client.ts";
@@ -54,6 +57,7 @@ export const keys = {
   attachments: (projectId: string) => ["project", projectId, "attachments"] as const,
   columns: (projectId: string) => ["project", projectId, "columns"] as const,
   testRuns: (projectId: string, testId: string) => ["project", projectId, "test-runs", testId] as const,
+  suites: (projectId: string) => ["project", projectId, "suites"] as const,
   /** Under the project prefix, so every project mutation refreshes the logs too. */
   activity: (projectId: string, scope?: { task?: string; test?: string }) =>
     ["project", projectId, "activity", scope ?? {}] as const,
@@ -497,6 +501,37 @@ export function useDeleteTest(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api<void>(`/tests/${id}`, { method: "DELETE" }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+// ---------- Test suites ----------
+export function useSuites(projectId: string) {
+  return useQuery({ queryKey: keys.suites(projectId), queryFn: () => api<TestSuite[]>(`/projects/${projectId}/suites`) });
+}
+
+export function useCreateSuite(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: TestSuiteInput) => api<TestSuite>(`/projects/${projectId}/suites`, { method: "POST", body: input }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+export function useUpdateSuite(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...patch }: TestSuitePatch & { id: string }) =>
+      api<TestSuite>(`/suites/${id}`, { method: "PATCH", body: patch }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+/** Deletes a suite; its tests and sub-suites move up a level (none are deleted). */
+export function useDeleteSuite(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<void>(`/suites/${id}`, { method: "DELETE" }),
     onSuccess: () => invalidateProject(qc, projectId),
   });
 }

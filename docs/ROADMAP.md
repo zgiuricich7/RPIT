@@ -73,7 +73,11 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
     ran, and its result picker records a run. Runs can be deleted (status falls back to the previous run); all
     of it is audited. Follow-up: notify the assignee (or linked task's assignee) when a run fails, flaky-test
     detection from run history, and attachments on runs (screenshots); 3.4 cycles can group runs.
-3.2 **Test suites / folders** to group test cases, with per-suite pass rates.
+3.2 ~~**Test suites / folders**~~ Done: nestable suites with a description; a suite sidebar on the Tests page
+    shows each suite's test count and pass rate (including sub-suites), and selecting one filters the page (kept
+    in `?suite=`). Tests are filed from the test dialog; new tests default to the selected suite. Deleting a suite
+    moves its tests and sub-suites up a level; nothing is deleted. All changes are audited and live-updated.
+    Follow-up: drag tests between suites, bulk move, manual suite ordering, and suite pass rates on the overview.
 3.3 **Structured steps** (ordered step + expected result per step) instead of free text.
 3.4 **Test plans / cycles**: a named set of tests to execute for a release, with progress.
 3.5 **Coverage view**: tasks with no linked tests, and roll-up of test status onto tasks.
