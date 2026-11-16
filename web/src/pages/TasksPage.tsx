@@ -7,12 +7,13 @@ import {
   activeFilterCount,
   hasRole,
   parseTaskFilter,
+  taskCoverage,
   taskMatcher,
   taskFilterParams,
   type Project,
   type TaskFilter,
 } from "@rpit/shared";
-import { useColumns, useLabels, useMe, useMembers, useTasks, useUsers } from "../api/hooks.ts";
+import { useColumns, useLabels, useMe, useMembers, useTasks, useTests, useUsers } from "../api/hooks.ts";
 import { ColumnsDialog } from "../components/columns.tsx";
 import { useDialogs } from "../components/dialogs.tsx";
 import { TaskFilters } from "../components/TaskFilters.tsx";
@@ -31,6 +32,8 @@ export function TasksPage() {
   const members = useMembers(project.id).data ?? [];
   const labels = useLabels(project.id).data ?? [];
   const columns = useColumns(project.id).data ?? [];
+  const tests = useTests(project.id).data;
+  const coverage = useMemo(() => taskCoverage(tasks.data ?? [], tests ?? []), [tasks.data, tests]);
   const isOwner = hasRole(project.role, "owner");
   const [editingColumns, setEditingColumns] = useState(false);
   const meId = useMe().data?.id ?? null;
@@ -50,6 +53,7 @@ export function TasksPage() {
     today,
     labels,
     columns,
+    coverage,
   };
   const shown = useMemo(() => (tasks.data ?? []).filter(matches).length, [tasks.data, matches]);
 

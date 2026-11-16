@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   PRIORITY_LABELS,
   TEST_STATUS_LABELS,
   ancestors,
   descendantIds,
+  taskCoverage,
   type Comment,
   type Member,
   type Priority,
@@ -40,6 +41,7 @@ import {
 import { formatDateTime } from "../lib/format.ts";
 import { ActivityFeed } from "./activity.tsx";
 import { Attachments } from "./attachments.tsx";
+import { TaskTests } from "./coverage.tsx";
 import { TestRuns } from "./testRuns.tsx";
 import { SuiteOptions } from "./suites.tsx";
 import { StepsEditor, draftSteps, stepsToSave } from "./testSteps.tsx";
@@ -57,7 +59,7 @@ export function useDialogs() {
   const update = (next: Record<string, string>) =>
     setSp((prev) => {
       const sp = new URLSearchParams(prev);
-      for (const k of ["task", "parent", "test", "comment"]) sp.delete(k);
+      for (const k of ["task", "parent", "test", "comment", "forTask"]) sp.delete(k);
       for (const [k, v] of Object.entries(next)) sp.set(k, v);
       return sp;
     });
@@ -66,6 +68,8 @@ export function useDialogs() {
     newTask: (parentId?: string | null) => update(parentId ? { task: "new", parent: parentId } : { task: "new" }),
     openTest: (id: string) => update({ test: id }),
     newTest: () => update({ test: "new" }),
+    /** A new test case linked to this task (?test=new&forTask=<id>). */
+    newTestFor: (taskId: string) => update({ test: "new", forTask: taskId }),
     close: () => update({}),
   };
 }
@@ -108,6 +112,7 @@ export function DialogHost({ projectId }: { projectId: string }) {
         test={test}
         tasks={tasks}
         defaultSuiteId={suite && suite !== "none" ? suite : null}
+        defaultTaskId={sp.get("forTask")}
         onClose={close}
       />
     );
@@ -131,6 +136,8 @@ function TaskDialog(props: {
   const members = useMembers(projectId).data ?? [];
   const labels = useLabels(projectId).data;
   const columns = useColumns(projectId).data ?? [];
+  const allTests = useTests(projectId).data ?? [];
+  const coverage = useMemo(() => taskCoverage(tasks, allTests), [tasks, allTests]);
   const { canEdit } = useProjectRole(projectId);
   const create = useCreateTask(projectId);
   const update = useUpdateTask(projectId);
@@ -318,6 +325,11 @@ function TaskDialog(props: {
           )}
         </div>
       </form>
+      {task && (
+        <div className="modal-body">
+          <TaskTests taskId={task.id} tests={allTests} coverage={coverage.get(task.id)} canEdit={canEdit} />
+        </div>
+      )}
       {task && (
         <div className="modal-body">
           <Attachments projectId={projectId} taskId={task.id} canEdit={canEdit} />
@@ -527,6 +539,7 @@ function TestDialog(props: {
   test: TestCase | null;
   tasks: Task[];
   defaultSuiteId: string | null;
+  defaultTaskId: string | null;
   onClose: () => void;
 }) {
   const { projectId, test, tasks, onClose } = props;
@@ -541,7 +554,7 @@ function TestDialog(props: {
     status: test?.status ?? ("not_run" as TestStatus),
     priority: test?.priority ?? ("medium" as Priority),
     assigneeId: test?.assigneeId ?? "",
-    taskId: test?.taskId ?? "",
+    taskId: test?.taskId ?? (props.defaultTaskId && tasks.some((t) => t.id === props.defaultTaskId) ? props.defaultTaskId : ""),
     suiteId: test?.suiteId ?? (props.defaultSuiteId && suites.some((s) => s.id === props.defaultSuiteId) ? props.defaultSuiteId : ""),
     // A new test starts with one empty step to fill in.
     steps: draftSteps(test?.steps ?? [{ action: "", expected: "" }]),

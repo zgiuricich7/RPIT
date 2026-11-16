@@ -165,6 +165,14 @@ main.page { padding: 20px; max-width: 1400px; margin: 0 auto; }
   .steps-edit li > textarea[data-field="expected"], .steps-edit .step-tools { grid-column: 2; }
 }
 
+/* ---------- Coverage ---------- */
+.coverage-badge { font-size: 11px; font-weight: 600; margin-left: 6px; white-space: nowrap; }
+.task-tests { display: grid; gap: 8px; }
+.task-tests h3 { font-size: 14px; display: flex; gap: 8px; align-items: center; }
+.coverage-bar { min-width: 140px; }
+.coverage-bar .stack { margin: 0 0 3px; height: 8px; }
+.crumb-inline { font-size: 11px; color: var(--mute); display: block; }
+
 /* ---------- Test plans ---------- */
 .plan-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
 .plan-card { text-align: left; font: inherit; color: inherit; cursor: pointer; display: grid; gap: 8px; }

@@ -24,6 +24,8 @@ and test case tracking — with a per-project overview dashboard.
 - **Test suites**: nestable folders for test cases, each with its pass rate (including sub-suites)
 - **Test runs**: record each run's result with notes; the test's status is its latest run, with a run timeline
   in the test dialog
+- **Test coverage**: which tasks have no linked tests, and test results rolled up onto tasks (and their parents),
+  with badges in the task list and a coverage percentage on the overview
 - **Test plans**: a named set of tests to run for a release (target date, open/closed), with progress and
   pass rate from the runs recorded in that plan
 - **Activity log**: every change to projects, members, tasks, labels, comments and test cases is recorded

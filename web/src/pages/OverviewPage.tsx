@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import {
   TASK_STATUSES,
@@ -7,8 +7,10 @@ import {
   TEST_STATUS_LABELS,
   buildTree,
   compareTasks,
+  coverageSummary,
   isOverdue,
   leafProgress,
+  taskCoverage,
   type Project,
   type TaskStatus,
 } from "@rpit/shared";
@@ -48,6 +50,7 @@ export function OverviewPage() {
   const columns = useColumns(project.id).data;
   const openPlans = (usePlans(project.id).data ?? []).filter((p) => !p.closedAt);
   const tests = useTests(project.id).data ?? [];
+  const coverage = useMemo(() => coverageSummary(tasks, taskCoverage(tasks, tests)), [tasks, tests]);
   const recent = useRecentComments(project.id).data ?? [];
   const projects = useProjects().data ?? [];
   const del = useDeleteProject();
@@ -113,6 +116,10 @@ export function OverviewPage() {
             {stat(summary.openTaskCount, "Open tasks")}
             {stat(overdueTasks.length, "Overdue tasks", overdueTasks.length ? "s-failed" : "")}
             {stat(summary.passRate === null ? "None" : `${summary.passRate}%`, "Test pass rate")}
+            <button className="stat" onClick={() => navigate(`/projects/${project.id}/coverage`)}>
+              <b>{coverage.leafCount ? `${coverage.percent}%` : "None"}</b>
+              <span>Test coverage ({coverage.coveredLeafCount} of {coverage.leafCount} tasks without subtasks)</span>
+            </button>
             {stat(summary.testsByStatus.failed, "Failed tests", "s-failed")}
             {stat(summary.commentCount, "Comments")}
           </div>

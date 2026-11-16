@@ -91,7 +91,12 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
     overall status. Closing a plan freezes it; deleting it keeps the runs. Open plans show on the overview.
     Follow-up: copy a plan for the next cycle (optionally only failed tests), per-test assignees within a plan,
     comparing two cycles, and a printable/exportable plan report.
-3.5 **Coverage view**: tasks with no linked tests, and roll-up of test status onto tasks.
+3.5 ~~**Coverage view**~~ Done: a Coverage page lists tasks (in tree order, with their path) with linked tests,
+    tests including subtasks (result bar) and a coverage state (failing / blocked / not run / passing / no tests),
+    filterable by state and to tasks without subtasks. Coverage % (tasks without subtasks that have a linked test)
+    is on the overview too. Task list rows get a 🧪 badge coloured by their rolled-up result, and the task dialog
+    has a Tests section with "Add test case" (pre-linked to the task).
+    Follow-up: link a test to more than one task, coverage on the board cards, and a coverage trend over time.
 3.6 **Import results** from CI (JUnit XML) via an API token.
 
 ## 4. Dashboard

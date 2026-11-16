@@ -41,6 +41,7 @@ import {
   type BoardColumn as Column,
   type FlatRow,
   type Label,
+  type TaskCoverage,
   type Task,
   type TaskSort,
   type User,
@@ -48,6 +49,7 @@ import {
 import { useMoveTask } from "../api/hooks.ts";
 import { useDialogs } from "../components/dialogs.tsx";
 import { AssigneeName, DueDate, Meter, TaskLabels, TaskStatusPill, priorityLabel } from "../components/ui.tsx";
+import { CoverageBadge } from "../components/coverage.tsx";
 import { formatDate } from "../lib/format.ts";
 
 /**
@@ -69,6 +71,8 @@ export interface ViewOptions {
   labels: Label[];
   /** The project's board columns, left to right (custom statuses). */
   columns: Column[];
+  /** Linked test results per task, rolled up through subtasks. */
+  coverage: Map<string, TaskCoverage>;
 }
 
 /** Pixels per tree level: indentation, and how far to drag sideways to nest or un-nest. */
@@ -107,7 +111,7 @@ const screenReaderInstructions = {
 
 export function ListView(props: { projectId: string; tasks: Task[]; users: User[] | undefined; canEdit: boolean; opts: ViewOptions }) {
   const { projectId, tasks, users, canEdit, opts } = props;
-  const { matches, filtered, sort, today, labels, columns } = opts;
+  const { matches, filtered, sort, today, labels, columns, coverage } = opts;
   const move = useMoveTask(projectId);
   const sensors = useDragSensors();
   // Order and nesting only mean something in manual order with every task shown.
@@ -235,6 +239,7 @@ export function ListView(props: { projectId: string; tasks: Task[]; users: User[
                     onToggle={() => toggle(row.id)}
                     context={filtered && !matches(byId.get(row.id)!)}
                     {...{ tasks, users, canEdit, draggable, today, labels, columns }}
+                    coverage={coverage.get(row.id)}
                   />
                 ))}
               </tbody>
@@ -261,6 +266,7 @@ function TaskRow(props: {
   today: string;
   labels: Label[];
   columns: Column[];
+  coverage: TaskCoverage | undefined;
 }) {
   const { task: t, depth, childCount, open, tasks, users, canEdit, draggable, today, labels, columns } = props;
   const dialogs = useDialogs();
@@ -298,6 +304,7 @@ function TaskRow(props: {
             {t.title}
           </button>
           <TaskLabels ids={t.labelIds} labels={labels} />
+          <CoverageBadge coverage={props.coverage} />
           {isDragging && childCount > 0 && (
             <span className="comment-count">
               +{childCount} subtask{childCount > 1 ? "s" : ""}

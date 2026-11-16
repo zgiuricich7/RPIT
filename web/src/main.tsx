@@ -11,6 +11,7 @@ import { LabelsPage } from "./pages/LabelsPage.tsx";
 import { MembersPage } from "./pages/MembersPage.tsx";
 import { OverviewPage } from "./pages/OverviewPage.tsx";
 import { PlansPage } from "./pages/PlansPage.tsx";
+import { CoveragePage } from "./pages/CoveragePage.tsx";
 import { TasksPage } from "./pages/TasksPage.tsx";
 import { TestsPage } from "./pages/TestsPage.tsx";
 import "./styles.css";
@@ -42,6 +43,7 @@ function App() {
         <Route path="tasks" element={<TasksPage />} />
         <Route path="tests" element={<TestsPage />} />
         <Route path="plans" element={<PlansPage />} />
+        <Route path="coverage" element={<CoveragePage />} />
         <Route path="labels" element={<LabelsPage />} />
         <Route path="members" element={<MembersPage />} />
       </Route>

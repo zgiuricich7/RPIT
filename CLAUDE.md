@@ -29,6 +29,7 @@ shared/   @rpit/shared — zod schemas, enums, labels, response types, tree util
           list drag-to-nest projection (treeDrag.ts: flattenTree, projectTreeDrop),
           task filters (filters.ts: TaskFilter, URL parse/params, taskMatcher),
           test suites (suites.ts: suiteTree, suitePath, suiteStats/testStats pass rates, testsInSuite),
+          test coverage (coverage.ts: taskCoverage roll-up, coverageState, coverageSummary),
           Markdown toolbar text transforms (markdown.ts, pure functions with tests).
           Imported as TypeScript source by both server and web (no build step).
 server/   Express 5 API on Node's built-in SQLite (node:sqlite, no native deps)
@@ -63,8 +64,9 @@ web/      React 19 + Vite + TanStack Query + React Router 7
   src/components/testRuns.tsx     TestRuns: run timeline + "Record run" form in the test dialog
   src/components/testSteps.tsx    StepsEditor: ordered action/expected rows (read-only view renders Markdown)
   src/components/suites.tsx       SuiteSidebar (tree + pass rates on the Tests page), SuiteDialog, SuiteOptions
+  src/components/coverage.tsx     CoverageBadge (task list), CoveragePill, TaskTests (task dialog's Tests section)
   src/components/labels.tsx    LabelPicker (toggle chips + create) for the task dialog; LabelChip/TaskLabels are in ui.tsx
-  src/pages/          Overview, Tasks (List + Board; filters and sort in the URL), Tests, Plans (list, ?plan=<id> detail),
+  src/pages/          Overview, Tasks (List + Board; filters and sort in the URL), Tests, Plans (list, ?plan=<id> detail), Coverage,
                       Labels, Members, Inbox, Auth
   src/components/TaskFilters.tsx  search box ("/" focuses it) + assignee/priority/status/label/due filter menus
   src/pages/taskViews.tsx  List and Board views with @dnd-kit drag and drop (mouse, touch, keyboard)
@@ -172,6 +174,11 @@ docs/ROADMAP.md       prioritised backlog
   is the single definition of "matches". The list keeps matches' ancestors (dimmed) for context; the board
   shows only the filtered status columns. `status` values are column ids, or built-in statuses that match every
   column with that category (older links). List drag is off while any filter is active.
+- **Coverage is computed client-side** from the task and test lists (`taskCoverage` in `shared/src/coverage.ts`):
+  a task's tests are those linked to it (`test_cases.task_id`) plus its subtasks'; its state is the worst result
+  (failing > blocked > not run > passing, or "none"). Coverage % = tasks without subtasks that have a linked test
+  / tasks without subtasks (like progress). "Add test case" from a task opens `?test=new&forTask=<id>`
+  (`useDialogs().newTestFor`). The Coverage page keeps its state filter in `?coverage=`.
 - **Progress = leaf tasks done / leaf tasks** (tasks with no children). Use `leafProgress` from shared;
   the server's `projectSummary` uses the same function, so overview numbers match the UI.
 - **Cache invalidation:** task/test/comment mutations invalidate `["project", projectId]`, which covers
