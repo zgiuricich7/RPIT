@@ -149,6 +149,16 @@ main.page { padding: 20px; max-width: 1400px; margin: 0 auto; }
   border: 1px solid color-mix(in srgb, var(--done) 45%, transparent); border-radius: var(--radius);
   background: color-mix(in srgb, var(--done) 8%, transparent);
 }
+/* ---------- Board columns editor ---------- */
+.column-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.column-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.column-row input { flex: 1 1 160px; width: auto; }
+.column-count { min-width: 56px; font-size: 12px; text-align: right; }
+.dot-swatch { width: 10px; height: 10px; border-radius: 50%; background: currentColor; flex: none; }
+.column-delete { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin: 8px 0 0 16px; }
+.column-delete .field { flex: 1 1 200px; }
+.column-help { flex-basis: 100%; font-size: 12px; }
+
 /* ---------- Attachments ---------- */
 .attachments { display: grid; gap: 8px; border-radius: var(--radius); }
 .attachments.over { outline: 2px dashed var(--acc); outline-offset: 6px; }

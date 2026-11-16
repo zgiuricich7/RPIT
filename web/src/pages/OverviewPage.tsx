@@ -13,6 +13,7 @@ import {
   type TaskStatus,
 } from "@rpit/shared";
 import {
+  useColumns,
   useDeleteProject,
   useProjectActivity,
   useProjectSummary,
@@ -42,6 +43,7 @@ export function OverviewPage() {
   const dialogs = useDialogs();
   const summary = useProjectSummary(project.id).data;
   const tasks = useTasks(project.id).data ?? [];
+  const columns = useColumns(project.id).data;
   const tests = useTests(project.id).data ?? [];
   const recent = useRecentComments(project.id).data ?? [];
   const projects = useProjects().data ?? [];
@@ -177,7 +179,7 @@ export function OverviewPage() {
               <button className="title-btn" onClick={() => dialogs.openTask(t.id)}>
                 {t.title}
               </button>
-              <TaskStatusPill status={t.status} />
+              <TaskStatusPill task={t} columns={columns} />
             </div>
           ))}
         </div>

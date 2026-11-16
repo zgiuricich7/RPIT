@@ -9,6 +9,7 @@ import {
   PRIORITY_LABELS,
   TASK_STATUSES,
   TASK_STATUS_LABELS,
+  type BoardColumn,
   activeFilterCount,
   type DueFilter,
   type Label,
@@ -30,6 +31,7 @@ export function TaskFilters(props: {
   onChange: (f: TaskFilter, opts?: { replace?: boolean }) => void;
   members: Member[];
   labels: Label[];
+  columns: BoardColumn[];
   meId: string | null;
   shown: number;
   total: number;
@@ -56,9 +58,16 @@ export function TaskFilters(props: {
       />
       <FilterMenu
         label="Status"
-        options={TASK_STATUSES.map((s) => [s, TASK_STATUS_LABELS[s]])}
+        options={[
+          ...props.columns.map((c): [string, string] => [c.id, c.name]),
+          // Links from before custom columns filter by built-in status: keep those choices visible.
+          ...TASK_STATUSES.filter((s) => filter.status.includes(s)).map((s): [string, string] => [
+            s,
+            `Any "${TASK_STATUS_LABELS[s]}" column`,
+          ]),
+        ]}
         selected={filter.status}
-        onChange={(v) => set("status", v as TaskFilter["status"])}
+        onChange={(v) => set("status", v)}
       />
       {(props.labels.length > 0 || filter.label.length > 0) && (
         <FilterMenu

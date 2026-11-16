@@ -112,11 +112,44 @@ export const MemberPatch = z.object({ role: ProjectRole });
 export type MemberInput = z.input<typeof MemberInput>;
 export type MemberPatch = z.infer<typeof MemberPatch>;
 
+// ---------- Board columns (custom statuses) ----------
+/**
+ * Each project has its own ordered board columns. A column "counts as" one of
+ * the built-in TASK_STATUSES (its category): a task's `status` is always its
+ * column's category, so progress, overdue, reminders and roll-up prompts keep
+ * working whatever the columns are called. Every project keeps at least one
+ * Done column and one that isn't Done.
+ */
+const columnName = z.string().trim().min(1, "Name is required").max(40, "Keep column names to 40 characters");
+export const ColumnInput = z.object({ name: columnName, category: TaskStatus });
+export const ColumnPatch = z.object({ name: columnName, category: TaskStatus }).partial();
+/** The project's column ids in their new order (every column, once). */
+export const ColumnOrder = z.object({ ids: z.array(id).min(1).max(50) });
+export type ColumnInput = z.infer<typeof ColumnInput>;
+export type ColumnPatch = z.infer<typeof ColumnPatch>;
+export type ColumnOrder = z.infer<typeof ColumnOrder>;
+/** The columns a new project starts with: one per built-in status. */
+export const DEFAULT_COLUMNS: { name: string; category: TaskStatus }[] = TASK_STATUSES.map((s) => ({
+  name: TASK_STATUS_LABELS[s],
+  category: s,
+}));
+export const COLUMN_CATEGORY_HELP: Record<TaskStatus, string> = {
+  todo: "Not started",
+  in_progress: "Being worked on",
+  in_review: "Waiting for review",
+  done: "Finished: counts towards progress and closes the task",
+};
+
 // ---------- Tasks ----------
+/**
+ * Place a task in a column with `columnId`, or give just `status` to use the
+ * first column with that category. With neither, it goes in the first column.
+ */
 export const TaskInput = z.object({
   title,
   description: longText.default(""),
-  status: TaskStatus.default("todo"),
+  columnId: id.optional(),
+  status: TaskStatus.optional(),
   priority: Priority.default("medium"),
   assigneeId: nullableId.default(null),
   parentId: nullableId.default(null),
@@ -133,6 +166,9 @@ export const TaskPatch = z
   .object({
     title,
     description: longText,
+    /** Moves the task to this column (its status follows). Takes precedence over `status`. */
+    columnId: id,
+    /** Moves the task to the first column with this category, unless it's already in one. */
     status: TaskStatus,
     priority: Priority,
     assigneeId: nullableId,
@@ -151,10 +187,12 @@ export { START_AFTER_DUE };
  * parent and/or in a new status (board column). `afterId` is the task that
  * should come right before it and `beforeId` the one right after, in whatever
  * list the user dropped into (its new siblings, or a board column). Omit both
- * to keep its place. Omitted `parentId` / `status` are left unchanged.
+ * to keep its place. Omitted `parentId` / `columnId` / `status` are left unchanged
+ * (`status` works as in TaskPatch).
  */
 export const TaskMove = z.object({
   parentId: nullableId.optional(),
+  columnId: id.optional(),
   status: TaskStatus.optional(),
   afterId: nullableId.optional(),
   beforeId: nullableId.optional(),
@@ -240,7 +278,7 @@ export const NotificationPatch = z.object({ read: z.boolean() });
 export type NotificationPatch = z.infer<typeof NotificationPatch>;
 
 // ---------- Activity log ----------
-export const ACTIVITY_ENTITIES = ["project", "member", "task", "comment", "test_case", "label", "attachment"] as const;
+export const ACTIVITY_ENTITIES = ["project", "member", "task", "comment", "test_case", "label", "attachment", "column"] as const;
 export const ACTIVITY_ACTIONS = ["created", "updated", "deleted"] as const;
 export const ActivityEntity = z.enum(ACTIVITY_ENTITIES);
 export const ActivityAction = z.enum(ACTIVITY_ACTIONS);
@@ -307,7 +345,10 @@ export interface Task {
   parentId: string | null;
   title: string;
   description: string;
+  /** The category of the task's column (see BoardColumn). */
   status: TaskStatus;
+  /** The board column the task is in. */
+  columnId: string;
   priority: Priority;
   assigneeId: string | null;
   /** Calendar dates, "YYYY-MM-DD". */
@@ -321,6 +362,16 @@ export interface Task {
   commentCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/** One of a project's board columns (a custom status). */
+export interface BoardColumn {
+  id: string;
+  projectId: string;
+  name: string;
+  /** Which built-in status tasks in this column have. */
+  category: TaskStatus;
+  position: number;
 }
 
 /** A project-scoped label (tag) for tasks. Names are unique per project, ignoring case. */

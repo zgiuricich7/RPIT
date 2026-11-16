@@ -9,6 +9,8 @@ and test case tracking — with a per-project overview dashboard.
 - **Project members** with owner, editor and viewer roles; invite teammates by email
 - **Unlimited subtask nesting** with progress roll-ups (measured on tasks that have no subtasks)
 - **List view** (collapsible tree) and **Board view** (drag cards between status columns)
+- **Custom board columns** per project: owners add, rename, reorder and delete columns; each counts as To do,
+  In progress, In review or Done, so progress and overdue tracking keep working
 - **Labels** per project (name and colour) to tag tasks; filter the list and board by label
 - **Attachments** on projects, tasks and test cases (up to 25 MB each): drop files in or pick them, with image
   thumbnails; stored on the server's disk next to the database (`UPLOADS_DIR` to change it)

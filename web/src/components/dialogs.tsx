@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefOb
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   PRIORITY_LABELS,
-  TASK_STATUS_LABELS,
   TEST_STATUS_LABELS,
   ancestors,
   descendantIds,
@@ -11,7 +10,6 @@ import {
   type Priority,
   type Project,
   type Task,
-  type TaskStatus,
   type TestCase,
   type TestStatus,
 } from "@rpit/shared";
@@ -23,6 +21,7 @@ import {
   useDeleteComment,
   useDeleteTask,
   useDeleteTest,
+  useColumns,
   useEditComment,
   useLabels,
   useMe,
@@ -116,6 +115,7 @@ function TaskDialog(props: {
   const { projectId, task, tasks, onClose } = props;
   const members = useMembers(projectId).data ?? [];
   const labels = useLabels(projectId).data;
+  const columns = useColumns(projectId).data ?? [];
   const { canEdit } = useProjectRole(projectId);
   const create = useCreateTask(projectId);
   const update = useUpdateTask(projectId);
@@ -123,7 +123,8 @@ function TaskDialog(props: {
   const [form, setForm] = useState({
     title: task?.title ?? "",
     description: task?.description ?? "",
-    status: task?.status ?? ("todo" as TaskStatus),
+    // Empty for a new task until chosen: the server puts it in the first column.
+    columnId: task?.columnId ?? "",
     priority: task?.priority ?? ("medium" as Priority),
     assigneeId: task?.assigneeId ?? "",
     parentId: task?.parentId ?? props.defaultParentId ?? "",
@@ -143,6 +144,7 @@ function TaskDialog(props: {
     setError(null);
     const body = {
       ...form,
+      columnId: form.columnId || undefined,
       assigneeId: form.assigneeId || null,
       parentId: form.parentId || null,
       startDate: form.startDate || null,
@@ -172,6 +174,8 @@ function TaskDialog(props: {
   const subtasks = task ? tasks.filter((t) => t.parentId === task.id) : [];
   const readyToClose =
     canEdit && !!task && task.status !== "done" && subtasks.length > 0 && subtasks.every((t) => t.status === "done");
+  const doneColumn = columns.find((c) => c.category === "done");
+  const chosenColumn = columns.find((c) => c.id === form.columnId);
 
   const busy = create.isPending || update.isPending;
   const heading = !task ? "New task" : canEdit ? "Edit task" : "Task";
@@ -195,9 +199,9 @@ function TaskDialog(props: {
           {readyToClose && (
             <div className="hint-box" role="status">
               All {subtasks.length} subtask{subtasks.length > 1 ? "s are" : " is"} done.
-              {form.status !== "done" ? (
-                <button type="button" className="btn sm" onClick={() => set("status", "done")}>
-                  Set status to Done
+              {chosenColumn?.category !== "done" && doneColumn ? (
+                <button type="button" className="btn sm" onClick={() => set("columnId", doneColumn.id)}>
+                  Move to {doneColumn.name}
                 </button>
               ) : (
                 <span className="muted">Save the task to mark it done.</span>
@@ -207,8 +211,12 @@ function TaskDialog(props: {
           <div className="two">
             <label className="field">
               Status
-              <select value={form.status} onChange={(e) => set("status", e.target.value as TaskStatus)}>
-                <Options labels={TASK_STATUS_LABELS} />
+              <select value={form.columnId || columns[0]?.id || ""} onChange={(e) => set("columnId", e.target.value)}>
+                {columns.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="field">

@@ -1,6 +1,7 @@
 import type {
   Activity,
   Attachment,
+  BoardColumn,
   Comment,
   CommentMention,
   Label,
@@ -57,6 +58,7 @@ export const toTask = (r: Row): Task => ({
   title: r.title as string,
   description: r.description as string,
   status: r.status as Task["status"],
+  columnId: r.column_id as string,
   priority: r.priority as Task["priority"],
   assigneeId: (r.assignee_id as string | null) ?? null,
   startDate: (r.start_date as string | null) ?? null,
@@ -217,6 +219,26 @@ export function getMember(db: DB, projectId: string, userId: string): Member | u
     | Row
     | undefined;
   return row && toMember(row);
+}
+
+export const toColumn = (r: Row): BoardColumn => ({
+  id: r.id as string,
+  projectId: r.project_id as string,
+  name: r.name as string,
+  category: r.category as BoardColumn["category"],
+  position: r.position as number,
+});
+
+/** The project's board columns, left to right. */
+export function listColumns(db: DB, projectId: string): BoardColumn[] {
+  return (
+    db.prepare(`SELECT * FROM board_columns WHERE project_id = ? ORDER BY position, created_at, id`).all(projectId) as Row[]
+  ).map(toColumn);
+}
+
+export function getColumn(db: DB, id: string): BoardColumn | undefined {
+  const row = db.prepare(`SELECT * FROM board_columns WHERE id = ?`).get(id) as Row | undefined;
+  return row && toColumn(row);
 }
 
 export function listLabels(db: DB, projectId: string): Label[] {

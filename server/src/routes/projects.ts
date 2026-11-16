@@ -8,6 +8,7 @@ import { currentUser } from "../auth.ts";
 import { requireProjectRole } from "../access.ts";
 import { changes, logActivity, PROJECT_FIELDS, snapshot } from "../activity.ts";
 import { syncProjectSubtasksDone } from "../rollup.ts";
+import { createDefaultColumns } from "../columns.ts";
 import { attachmentIds, removeFilesAfterCommit } from "../uploads.ts";
 
 export function projectRoutes(db: DB) {
@@ -48,6 +49,7 @@ export function projectRoutes(db: DB) {
         input.notifySubtasksDone ? 1 : 0,
       );
       db.prepare(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'owner')`).run(id, user.id);
+      createDefaultColumns(db, id);
       logActivity(db, {
         ...projectEntry(id, user.id, input.name),
         action: "created",

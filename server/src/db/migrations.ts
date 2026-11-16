@@ -316,4 +316,67 @@ export const migrations: string[] = [
   BEFORE DELETE ON activity
   BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
   `,
+
+  /* 10: configurable board columns (custom statuses) per project */ `
+  -- A column "counts as" one of the built-in statuses (category); tasks.status stays that category,
+  -- kept in step with tasks.column_id by the server.
+  CREATE TABLE board_columns (
+    id         TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    category   TEXT NOT NULL CHECK (category IN ('todo','in_progress','in_review','done')),
+    position   REAL NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE UNIQUE INDEX idx_columns_name ON board_columns(project_id, name COLLATE NOCASE);
+  CREATE INDEX idx_columns_project ON board_columns(project_id, position);
+
+  -- Every existing project gets the four columns it had implicitly (UUID-shaped random ids).
+  INSERT INTO board_columns (id, project_id, name, category, position)
+  SELECT lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-'
+           || substr('89ab', 1 + (abs(random()) % 4), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))),
+         p.id, d.name, d.category, d.pos
+  FROM projects p CROSS JOIN (
+    SELECT 'To do' AS name, 'todo' AS category, 1 AS pos UNION ALL
+    SELECT 'In progress', 'in_progress', 2 UNION ALL
+    SELECT 'In review', 'in_review', 3 UNION ALL
+    SELECT 'Done', 'done', 4
+  ) d;
+
+  -- No ON DELETE action: a column with tasks can't be deleted until they're moved (the route does that).
+  ALTER TABLE tasks ADD COLUMN column_id TEXT REFERENCES board_columns(id);
+  UPDATE tasks SET column_id =
+    (SELECT c.id FROM board_columns c WHERE c.project_id = tasks.project_id AND c.category = tasks.status);
+  CREATE INDEX idx_tasks_column ON tasks(column_id);
+
+  -- Recreate activity to widen the entity CHECK with 'column' (same steps as migration 7).
+  DROP TRIGGER activity_no_update;
+  DROP TRIGGER activity_no_delete;
+  CREATE TABLE activity_new (
+    id         TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    actor_id   TEXT REFERENCES users(id) ON DELETE SET NULL,
+    entity     TEXT NOT NULL
+               CHECK (entity IN ('project','member','task','comment','test_case','label','attachment','column')),
+    entity_id  TEXT NOT NULL,
+    task_id    TEXT,
+    action     TEXT NOT NULL CHECK (action IN ('created','updated','deleted')),
+    label      TEXT NOT NULL DEFAULT '',
+    diff       TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  INSERT INTO activity_new (rowid, id, project_id, actor_id, entity, entity_id, task_id, action, label, diff, created_at)
+    SELECT rowid, id, project_id, actor_id, entity, entity_id, task_id, action, label, diff, created_at FROM activity;
+  DROP TABLE activity;
+  ALTER TABLE activity_new RENAME TO activity;
+  CREATE INDEX idx_activity_project ON activity(project_id);
+  CREATE INDEX idx_activity_task ON activity(task_id);
+  CREATE INDEX idx_activity_entity ON activity(entity, entity_id);
+  CREATE TRIGGER activity_no_update
+  BEFORE UPDATE OF id, project_id, entity, entity_id, task_id, action, label, diff, created_at ON activity
+  BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
+  CREATE TRIGGER activity_no_delete
+  BEFORE DELETE ON activity
+  BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
+  `,
 ];

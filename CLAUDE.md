@@ -41,6 +41,7 @@ server/   Express 5 API on Node's built-in SQLite (node:sqlite, no native deps)
   src/reminders.ts    sendTaskReminders(db, today) + the 15-minute scheduler started in index.ts
   src/rollup.ts       syncSubtasksDone: "all subtasks are done" prompts to a parent task's assignee
   src/uploads.ts      attachment files on disk (named by id), removeFilesAfterCommit, startup orphan sweep
+  src/columns.ts      board columns: resolveColumn (columnId/status -> column), defaults, "keep a Done column" rule
   src/routes/attachments.ts  upload (raw body), list, download (safe headers), delete
   src/activity.ts     logActivity + changes/snapshot diff helpers and the tracked fields per entity
   src/events.ts       in-process EventHub: logActivity publishes a ProjectEvent after commit
@@ -57,6 +58,7 @@ web/      React 19 + Vite + TanStack Query + React Router 7
   src/components/TopBar.tsx    header with project switcher and inbox badge
   src/components/activity.tsx  ActivityFeed: renders log entries as sentences + field changes
   src/components/attachments.tsx  Attachments: file list + upload/drop for a task, test case or the project
+  src/components/columns.tsx      ColumnsDialog: owners add/rename/recategorise/reorder/delete board columns
   src/components/labels.tsx    LabelPicker (toggle chips + create) for the task dialog; LabelChip/TaskLabels are in ui.tsx
   src/pages/          Overview, Tasks (List + Board; filters and sort in the URL), Tests, Labels, Members, Inbox, Auth
   src/components/TaskFilters.tsx  search box ("/" focuses it) + assignee/priority/status/label/due filter menus
@@ -76,6 +78,15 @@ docs/ROADMAP.md       prioritised backlog
   timestamps. Start can't be after due: zod refines it when both are sent, the PATCH route checks the merged values.
   `tasks.remind_assignee` (0/1) opts a task into date reminders; `task_reminders(task_id, kind, for_date)` records
   reminders already sent so each goes out once (cascades from the task).
+- `board_columns(project_id, name, category, position)` — each project's board columns (custom statuses), unique
+  name per project `COLLATE NOCASE`. `category` is one of `TASK_STATUSES` (CHECK + zod): what the column "counts
+  as". `tasks.column_id → board_columns.id` (no ON DELETE: the delete route moves tasks first). **`tasks.status` is
+  always the category of the task's column**; the server keeps them in step (`resolveColumn` in
+  `server/src/columns.ts`), so everything that asks "is it done?" (progress, overdue, reminders, roll-up prompts,
+  summary) still reads `status`. The UI shows the column name (`TaskStatusPill task columns`). Clients move tasks
+  with `columnId`; `status` alone means "the first column with that category" (kept if already in one) and is
+  still accepted (e.g. the inbox's Mark as done). New projects get `DEFAULT_COLUMNS`; a project always keeps a Done
+  column and a non-Done one. Owners manage columns; editors move tasks between them.
 - `labels(project_id, name, color)` — per-project task labels; `name` is unique per project `COLLATE NOCASE`,
   `color` is one of `LABEL_COLORS` (CHECK + `LabelColor` zod enum; CSS classes `.lc-<color>` in styles.css).
   `task_labels(task_id, label_id)` links them; both FKs cascade. Tasks expose `labelIds` (in label name order);
@@ -97,7 +108,8 @@ docs/ROADMAP.md       prioritised backlog
   Entities: `project` / `member` / `task` / `comment` / `test_case` / `label`.
   **No foreign keys** on project/entity/task ids so entries outlive what they describe; `label` snapshots the
   name at the time; `diff` is JSON `{ field: { from, to } }`. Triggers make it append-only (UPDATE/DELETE abort).
-- Statuses and priorities are constrained by `CHECK` in SQL **and** by zod enums in `shared`. Change both together.
+- Statuses (column categories) and priorities are constrained by `CHECK` in SQL **and** by zod enums in `shared`.
+  Change both together. Project-specific status names are board columns, not new enum values.
 
 ## Conventions
 
@@ -123,12 +135,13 @@ docs/ROADMAP.md       prioritised backlog
   A pure reorder isn't audited (position is internal) but publishes a real-time event directly; parent and
   status changes from a move are logged as usual. Dragging is only enabled in manual order (and, in the list,
   with no due filter); a sorted board still allows moving cards between columns.
-- **Task filters live in the URL** (`?q=&assignee=me,none,<id>&priority=&status=&label=<id>,none&due=`), parsed with
+- **Task filters live in the URL** (`?q=&assignee=me,none,<id>&priority=&status=<columnId>|<category>&label=<id>,none&due=`), parsed with
   `parseTaskFilter` and written with `taskFilterParams` (`shared/src/filters.ts`) so other params (view, sort,
   open dialogs) survive. Values in one filter are OR'ed, filters are AND'ed; search needs every word in the title
   or description (case/accent-insensitive). Filtering is client-side over the loaded task list; `taskMatcher`
   is the single definition of "matches". The list keeps matches' ancestors (dimmed) for context; the board
-  shows only the filtered status columns. List drag is off while any filter is active.
+  shows only the filtered status columns. `status` values are column ids, or built-in statuses that match every
+  column with that category (older links). List drag is off while any filter is active.
 - **Progress = leaf tasks done / leaf tasks** (tasks with no children). Use `leafProgress` from shared;
   the server's `projectSummary` uses the same function, so overview numbers match the UI.
 - **Cache invalidation:** task/test/comment mutations invalidate `["project", projectId]`, which covers
@@ -161,8 +174,9 @@ docs/ROADMAP.md       prioritised backlog
   `transaction` as the change (use `snapshot` for create/delete, `changes` for updates; empty update diffs are
   skipped). Log side effects too (cascaded subtask deletes, unlinked tests, unassignments, labels removed from
   tasks when a label is deleted). Task diffs go through `auditedTask(db, task)`, which adds `labels` as the
-  joined label names, so history keeps the names as they were. New tracked fields
-  go in `TASK_FIELDS` / `TEST_FIELDS` / `PROJECT_FIELDS` / `LABEL_FIELDS`, plus a label in `web/src/components/activity.tsx`.
+  joined label names and replaces `status` with the column's name, so history keeps the names as they were
+  (entries from before custom columns hold the status key; the feed shows both). New tracked fields
+  go in `TASK_FIELDS` / `TEST_FIELDS` / `PROJECT_FIELDS` / `LABEL_FIELDS` / `COLUMN_FIELDS`, plus a label in `web/src/components/activity.tsx`.
   Adding an entity or action type needs a new migration that recreates the CHECK.
 - **Notifications are in-app only** (no email). Create them with `notify` / `notifyAssignment` /
   `recordCommentActivity` from `server/src/notify.ts` after a write; they skip the actor and non-members.

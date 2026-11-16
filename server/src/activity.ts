@@ -17,18 +17,21 @@ type Value = FieldChange["from"];
 type Fields<T> = readonly (keyof T & string)[];
 
 /**
- * A task as the log sees it: `labels` is the label names ("Bug, Frontend", or
- * null for none) rather than ids, so entries keep the names as they were.
+ * A task as the log sees it, with names instead of ids so entries keep them as
+ * they were: `labels` is the label names ("Bug, Frontend", or null for none)
+ * and `status` is the board column's name ("QA"), not its category. (Entries
+ * from before custom columns hold the built-in status key, e.g. "in_review".)
  */
-export type AuditedTask = Task & { labels: string | null };
+export type AuditedTask = Omit<Task, "status"> & { status: string; labels: string | null };
 export function auditedTask(db: DB, t: Task): AuditedTask {
+  const column = db.prepare(`SELECT name FROM board_columns WHERE id = ?`).get(t.columnId) as { name: string } | undefined;
   const names = db
     .prepare(
       `SELECT l.name FROM task_labels tl JOIN labels l ON l.id = tl.label_id
        WHERE tl.task_id = ? ORDER BY l.name COLLATE NOCASE, l.id`,
     )
     .all(t.id) as { name: string }[];
-  return { ...t, labels: names.length ? names.map((n) => n.name).join(", ") : null };
+  return { ...t, status: column?.name ?? t.status, labels: names.length ? names.map((n) => n.name).join(", ") : null };
 }
 
 /** Tracked fields per entity. Internal fields (position, timestamps) are left out. */
@@ -47,6 +50,7 @@ export const TASK_FIELDS = [
 export const TEST_FIELDS = ["title", "status", "priority", "assigneeId", "taskId", "steps", "expected", "notes"] as const;
 export const PROJECT_FIELDS = ["name", "description", "notifySubtasksDone"] as const;
 export const LABEL_FIELDS = ["name", "color"] as const;
+export const COLUMN_FIELDS = ["name", "category"] as const;
 
 const norm = (v: unknown): Value => (v === undefined ? null : (v as Value));
 

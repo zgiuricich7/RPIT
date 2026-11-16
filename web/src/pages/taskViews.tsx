@@ -29,8 +29,6 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
-  TASK_STATUSES,
-  TASK_STATUS_LABELS,
   ancestors,
   buildTree,
   childrenIndex,
@@ -40,11 +38,11 @@ import {
   matchesWithAncestors,
   projectTreeDrop,
   type TaskFilter,
+  type BoardColumn as Column,
   type FlatRow,
   type Label,
   type Task,
   type TaskSort,
-  type TaskStatus,
   type User,
 } from "@rpit/shared";
 import { useMoveTask } from "../api/hooks.ts";
@@ -69,6 +67,8 @@ export interface ViewOptions {
   today: string;
   /** The project's labels, for showing tasks' label chips. */
   labels: Label[];
+  /** The project's board columns, left to right (custom statuses). */
+  columns: Column[];
 }
 
 /** Pixels per tree level: indentation, and how far to drag sideways to nest or un-nest. */
@@ -107,7 +107,7 @@ const screenReaderInstructions = {
 
 export function ListView(props: { projectId: string; tasks: Task[]; users: User[] | undefined; canEdit: boolean; opts: ViewOptions }) {
   const { projectId, tasks, users, canEdit, opts } = props;
-  const { matches, filtered, sort, today, labels } = opts;
+  const { matches, filtered, sort, today, labels, columns } = opts;
   const move = useMoveTask(projectId);
   const sensors = useDragSensors();
   // Order and nesting only mean something in manual order with every task shown.
@@ -234,7 +234,7 @@ export function ListView(props: { projectId: string; tasks: Task[]; users: User[
                     open={!collapsed.has(row.id)}
                     onToggle={() => toggle(row.id)}
                     context={filtered && !matches(byId.get(row.id)!)}
-                    {...{ tasks, users, canEdit, draggable, today, labels }}
+                    {...{ tasks, users, canEdit, draggable, today, labels, columns }}
                   />
                 ))}
               </tbody>
@@ -260,8 +260,9 @@ function TaskRow(props: {
   draggable: boolean;
   today: string;
   labels: Label[];
+  columns: Column[];
 }) {
-  const { task: t, depth, childCount, open, tasks, users, canEdit, draggable, today, labels } = props;
+  const { task: t, depth, childCount, open, tasks, users, canEdit, draggable, today, labels, columns } = props;
   const dialogs = useDialogs();
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
     id: t.id,
@@ -306,7 +307,7 @@ function TaskRow(props: {
         </div>
       </td>
       <td>
-        <TaskStatusPill status={t.status} />
+        <TaskStatusPill task={t} columns={columns} />
       </td>
       <td>{priorityLabel(t.priority)}</td>
       <td>
@@ -331,7 +332,8 @@ function TaskRow(props: {
 // ---------------------------------------------------------------------------
 // Board: drag cards between columns to change status, and within a column to reorder.
 
-type Columns = Record<TaskStatus, string[]>;
+/** Task ids per board column id. */
+type Columns = Record<string, string[]>;
 const COLUMN_PREFIX = "column:";
 /** In a sorted board, cards keep their sorted place: no reorder preview inside a column. */
 const noReorder: SortingStrategy = () => null;
@@ -339,8 +341,13 @@ const noReorder: SortingStrategy = () => null;
 export function BoardView(props: { projectId: string; tasks: Task[]; users: User[] | undefined; canEdit: boolean; opts: ViewOptions }) {
   const { projectId, tasks, users, canEdit } = props;
   const { filter, matches, sort, today, labels } = props.opts;
-  // Filtering by status shows just those columns.
-  const statuses = filter.status.length ? TASK_STATUSES.filter((s) => filter.status.includes(s)) : TASK_STATUSES;
+  // Filtering by status shows just those columns (by id, or every column of a built-in status).
+  const boardColumns = props.opts.columns;
+  const visible = filter.status.length
+    ? boardColumns.filter((c) => filter.status.includes(c.id) || filter.status.includes(c.category))
+    : boardColumns;
+  const columnIds = useMemo(() => boardColumns.map((c) => c.id), [boardColumns]);
+  const columnById = useMemo(() => new Map(boardColumns.map((c) => [c.id, c])), [boardColumns]);
   const move = useMoveTask(projectId);
   const sensors = useDragSensors();
   const [leafOnly, setLeafOnly] = useState(false);
@@ -350,13 +357,13 @@ export function BoardView(props: { projectId: string; tasks: Task[]; users: User
   const reorderable = sort === "manual";
 
   const columns = useMemo(() => {
-    const out = Object.fromEntries(TASK_STATUSES.map((s) => [s, [] as Task[]])) as Record<TaskStatus, Task[]>;
+    const out = Object.fromEntries(columnIds.map((c) => [c, [] as Task[]])) as Record<string, Task[]>;
     for (const t of tasks) {
-      if ((!leafOnly || !hasKids(t.id)) && matches(t)) out[t.status].push(t);
+      if ((!leafOnly || !hasKids(t.id)) && matches(t)) out[t.columnId]?.push(t);
     }
-    if (sort !== "manual") for (const s of TASK_STATUSES) out[s].sort(compareTasks(sort));
-    return Object.fromEntries(TASK_STATUSES.map((s) => [s, out[s].map((t) => t.id)])) as Columns;
-  }, [tasks, leafOnly, matches, sort, idx]);
+    if (sort !== "manual") for (const c of columnIds) out[c]!.sort(compareTasks(sort));
+    return Object.fromEntries(columnIds.map((c) => [c, out[c]!.map((t) => t.id)])) as Columns;
+  }, [tasks, leafOnly, matches, sort, idx, columnIds]);
 
   // While dragging, a working copy of the columns so the card previews in its new place.
   const [draft, setDraft] = useState<Columns | null>(null);
@@ -386,7 +393,7 @@ export function BoardView(props: { projectId: string; tasks: Task[]; users: User
       if (overId != null) {
         const id = String(overId);
         if (id.startsWith(COLUMN_PREFIX)) {
-          const cards = shown[id.slice(COLUMN_PREFIX.length) as TaskStatus];
+          const cards = shown[id.slice(COLUMN_PREFIX.length)] ?? [];
           if (cards.length) {
             const inColumn = args.droppableContainers.filter((c) => c.id !== id && cards.includes(String(c.id)));
             overId = closestCenter({ ...args, droppableContainers: inColumn })[0]?.id ?? overId;
@@ -401,10 +408,10 @@ export function BoardView(props: { projectId: string; tasks: Task[]; users: User
     [activeId, shown],
   );
 
-  const columnOf = (id: UniqueIdentifier, cols: Columns): TaskStatus | null => {
+  const columnOf = (id: UniqueIdentifier, cols: Columns): string | null => {
     const s = String(id);
-    if (s.startsWith(COLUMN_PREFIX)) return s.slice(COLUMN_PREFIX.length) as TaskStatus;
-    return TASK_STATUSES.find((st) => cols[st].includes(s)) ?? null;
+    if (s.startsWith(COLUMN_PREFIX)) return s.slice(COLUMN_PREFIX.length);
+    return columnIds.find((c) => cols[c]?.includes(s)) ?? null;
   };
 
   const onDragOver = ({ active, over }: DragOverEvent) => {
@@ -415,13 +422,13 @@ export function BoardView(props: { projectId: string; tasks: Task[]; users: User
     if (!from || !to || from === to) return;
     // Moving into another column: insert before the hovered card, or after it when the dragged card is
     // past its middle (so the bottom of a column means "last"), or at the end over empty column space.
-    const target = cols[to].filter((id) => id !== active.id);
+    const target = (cols[to] ?? []).filter((id) => id !== active.id);
     const at = target.indexOf(String(over.id));
     const dragged = active.rect.current.translated;
     const below = !!dragged && dragged.top + dragged.height / 2 > over.rect.top + over.rect.height / 2;
     target.splice(at < 0 ? target.length : at + (below ? 1 : 0), 0, String(active.id));
     movedColumn.current = true;
-    setDraft({ ...cols, [from]: cols[from].filter((id) => id !== active.id), [to]: target });
+    setDraft({ ...cols, [from]: (cols[from] ?? []).filter((id) => id !== active.id), [to]: target });
   };
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
@@ -429,30 +436,31 @@ export function BoardView(props: { projectId: string; tasks: Task[]; users: User
     setDraft(null);
     setActiveId(null);
     const t = byId.get(String(active.id));
-    const status = over ? columnOf(over.id, cols) : null;
-    if (!t || !status) return;
-    let list = cols[status];
+    const columnId = over ? columnOf(over.id, cols) : null;
+    if (!t || !columnId) return;
+    let list = cols[columnId] ?? [];
     const from = list.indexOf(t.id);
     const to = over && !String(over.id).startsWith(COLUMN_PREFIX) ? list.indexOf(String(over.id)) : from;
     if (from >= 0 && to >= 0 && from !== to) list = arrayMove(list, from, to);
 
     if (!reorderable) {
       // Sorted board: only the column (status) can change.
-      if (status !== t.status) move.mutate({ id: t.id, status });
+      if (columnId !== t.columnId) move.mutate({ id: t.id, columnId });
       return;
     }
     const i = list.indexOf(t.id);
     const afterId = list[i - 1] ?? null;
     const beforeId = list[i + 1] ?? null;
-    const old = columns[t.status];
+    const old = columns[t.columnId] ?? [];
     const oi = old.indexOf(t.id);
-    const samePlace = status === t.status && (old[oi - 1] ?? null) === afterId && (old[oi + 1] ?? null) === beforeId;
-    if (!samePlace) move.mutate({ id: t.id, status: status === t.status ? undefined : status, afterId, beforeId });
+    const same = columnId === t.columnId;
+    const samePlace = same && (old[oi - 1] ?? null) === afterId && (old[oi + 1] ?? null) === beforeId;
+    if (!samePlace) move.mutate({ id: t.id, columnId: same ? undefined : columnId, afterId, beforeId });
   };
 
   const title = (id: UniqueIdentifier | undefined) => {
     const s = String(id ?? "");
-    if (s.startsWith(COLUMN_PREFIX)) return `the ${TASK_STATUS_LABELS[s.slice(COLUMN_PREFIX.length) as TaskStatus]} column`;
+    if (s.startsWith(COLUMN_PREFIX)) return `the ${columnById.get(s.slice(COLUMN_PREFIX.length))?.name ?? ""} column`;
     return byId.get(s)?.title ?? "task";
   };
   const active = activeId ? byId.get(activeId) : undefined;
@@ -481,17 +489,17 @@ export function BoardView(props: { projectId: string; tasks: Task[]; users: User
           setActiveId(null);
         }}
       >
-        <div className="board" style={{ "--board-cols": statuses.length } as CSSProperties}>
-          {statuses.map((status) => (
+        <div className="board" style={{ "--board-cols": visible.length } as CSSProperties}>
+          {visible.map((column) => (
             <BoardColumn
-              key={status}
-              status={status}
-              count={shown[status].length}
-              highlight={!!activeId && overColumn === status}
-              ids={shown[status]}
+              key={column.id}
+              column={column}
+              count={(shown[column.id] ?? []).length}
+              highlight={!!activeId && overColumn === column.id}
+              ids={shown[column.id] ?? []}
               strategy={reorderable ? verticalListSortingStrategy : noReorder}
             >
-              {shown[status].map((id) => {
+              {(shown[column.id] ?? []).map((id) => {
                 const t = byId.get(id);
                 return t ? <BoardCard key={id} task={t} {...{ tasks, users, canEdit, today, labels }} hasKids={hasKids(id)} /> : null;
               })}
@@ -509,20 +517,20 @@ export function BoardView(props: { projectId: string; tasks: Task[]; users: User
 }
 
 function BoardColumn(props: {
-  status: TaskStatus;
+  column: Column;
   count: number;
   highlight: boolean;
   ids: string[];
   strategy: SortingStrategy;
   children: ReactNode;
 }) {
-  const { status } = props;
+  const { column } = props;
   // The column itself is a drop target so empty columns (and the space below the last card) accept drops.
-  const { setNodeRef } = useDroppable({ id: COLUMN_PREFIX + status });
+  const { setNodeRef } = useDroppable({ id: COLUMN_PREFIX + column.id });
   return (
-    <section ref={setNodeRef} className={`column ${props.highlight ? "over" : ""}`} aria-label={TASK_STATUS_LABELS[status]}>
+    <section ref={setNodeRef} className={`column ${props.highlight ? "over" : ""}`} aria-label={column.name}>
       <h3>
-        <span className={`s-${status}`}>{TASK_STATUS_LABELS[status]}</span>
+        <span className={`s-${column.category}`}>{column.name}</span>
         <span>{props.count}</span>
       </h3>
       <SortableContext items={props.ids} strategy={props.strategy}>

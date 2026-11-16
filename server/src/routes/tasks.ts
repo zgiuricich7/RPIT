@@ -11,7 +11,8 @@ import {
 } from "@rpit/shared";
 import type { DB } from "../db/index.ts";
 import { newId, now, transaction } from "../db/index.ts";
-import { COMMENT_SELECT, getMemberRole, getTask, listTasks, toComment, toTestCase, wouldCreateCycle } from "../db/repo.ts";
+import { resolveColumn } from "../columns.ts";
+import { COMMENT_SELECT, getColumn, getMemberRole, getTask, listTasks, toComment, toTestCase, wouldCreateCycle } from "../db/repo.ts";
 import { HttpError, notFound, param, parseBody } from "../http.ts";
 import { currentUser } from "../auth.ts";
 import { byComment, byTask, currentProject, requireProjectRole } from "../access.ts";
@@ -85,19 +86,21 @@ export function taskRoutes(db: DB) {
     checkParent(projectId, input.parentId);
     checkAssignee(db, projectId, input.assigneeId);
     const labelIds = checkLabels(db, projectId, input.labelIds);
+    const column = resolveColumn(db, projectId, input);
     const id = newId();
     const task = transaction(db, () => {
       db.prepare(
-        `INSERT INTO tasks (id, project_id, parent_id, title, description, status, priority, assignee_id,
+        `INSERT INTO tasks (id, project_id, parent_id, title, description, status, column_id, priority, assignee_id,
            start_date, due_date, remind_assignee, position)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         projectId,
         input.parentId,
         input.title,
         input.description,
-        input.status,
+        column.category,
+        column.id,
         input.priority,
         input.assigneeId,
         input.startDate,
@@ -137,7 +140,8 @@ export function taskRoutes(db: DB) {
     }
     if (p.assigneeId !== undefined && p.assigneeId !== cur.assigneeId) checkAssignee(db, cur.projectId, p.assigneeId);
     const labelIds = p.labelIds === undefined ? undefined : checkLabels(db, cur.projectId, p.labelIds);
-    const merged = { ...cur, ...p, position };
+    const column = resolveColumn(db, cur.projectId, p, getColumn(db, cur.columnId));
+    const merged = { ...cur, ...p, position, status: column.category, columnId: column.id };
     // The schema checks the order when both dates are sent; this covers changing just one.
     if (merged.startDate && merged.dueDate && merged.startDate > merged.dueDate) {
       throw new HttpError(400, START_AFTER_DUE, { startDate: [START_AFTER_DUE] });
@@ -145,7 +149,7 @@ export function taskRoutes(db: DB) {
     const task = transaction(db, () => {
       const before = auditedTask(db, cur);
       db.prepare(
-        `UPDATE tasks SET parent_id = ?, title = ?, description = ?, status = ?, priority = ?,
+        `UPDATE tasks SET parent_id = ?, title = ?, description = ?, status = ?, column_id = ?, priority = ?,
            assignee_id = ?, start_date = ?, due_date = ?, remind_assignee = ?, position = ?, updated_at = ?
          WHERE id = ?`,
       ).run(
@@ -153,6 +157,7 @@ export function taskRoutes(db: DB) {
         merged.title,
         merged.description,
         merged.status,
+        merged.columnId,
         merged.priority,
         merged.assigneeId,
         merged.startDate,
@@ -201,8 +206,10 @@ export function taskRoutes(db: DB) {
     };
     neighbour(m.afterId);
     neighbour(m.beforeId);
+    const column = resolveColumn(db, cur.projectId, m, getColumn(db, cur.columnId));
 
     const task = transaction(db, () => {
+      const before = auditedTask(db, cur);
       let position = cur.position;
       if (m.afterId || m.beforeId) {
         // Read neighbours' positions inside the transaction; renumber once if they're too close to split.
@@ -216,17 +223,11 @@ export function taskRoutes(db: DB) {
       } else if (parentId !== cur.parentId) {
         position = nextPosition(cur.projectId);
       }
-      db.prepare(`UPDATE tasks SET parent_id = ?, status = ?, position = ?, updated_at = ? WHERE id = ?`).run(
-        parentId,
-        m.status ?? cur.status,
-        position,
-        now(),
-        id,
-      );
+      db.prepare(
+        `UPDATE tasks SET parent_id = ?, status = ?, column_id = ?, position = ?, updated_at = ? WHERE id = ?`,
+      ).run(parentId, column.category, column.id, position, now(), id);
       const t = requireTask(id);
-      // Labels can't change here, so they're the same on both sides.
-      const labels = auditedTask(db, t).labels;
-      const diff = changes({ ...cur, labels }, { ...t, labels }, TASK_FIELDS);
+      const diff = changes(before, auditedTask(db, t), TASK_FIELDS);
       if (Object.keys(diff).length) {
         logActivity(db, { ...taskEntry(t), actorId, action: "updated", diff });
       } else if (t.position !== cur.position) {

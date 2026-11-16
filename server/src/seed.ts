@@ -10,6 +10,7 @@ import { newId, openDatabase, transaction } from "./db/index.ts";
 import { hashPassword } from "./auth.ts";
 import { addDays, toCalendarDate } from "@rpit/shared";
 import { recordCommentActivity } from "./notify.ts";
+import { createDefaultColumns } from "./columns.ts";
 
 const db = openDatabase(config.databasePath);
 
@@ -33,6 +34,12 @@ db.prepare(`INSERT INTO projects (id, name, description) VALUES (?, ?, ?)`).run(
 const addMember = db.prepare(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, ?)`);
 addMember.run(project, maya, "owner");
 addMember.run(project, priya, "editor");
+createDefaultColumns(db, project);
+// A custom column: QA counts as "In review".
+db.prepare(`INSERT INTO board_columns (id, project_id, name, category, position) VALUES (?, ?, 'QA', 'in_review', 3.5)`).run(
+  newId(),
+  project,
+);
 
 const insertTask = db.prepare(
   `INSERT INTO tasks (id, project_id, parent_id, title, status, priority, assignee_id, position)
@@ -58,6 +65,15 @@ transaction(db, () => {
   task("buttons", "lib", "Buttons and inputs", "in_review", "medium", priya, 1);
   task("table", "lib", "Data table", "todo", "medium", null, 2);
   task("content", "launch", "Migrate content", "todo", "high", maya, 2);
+  // Each task goes in the first column for its status; Buttons and inputs is in QA.
+  db.prepare(
+    `UPDATE tasks SET column_id = (SELECT c.id FROM board_columns c WHERE c.project_id = tasks.project_id
+       AND c.category = tasks.status ORDER BY c.position LIMIT 1) WHERE project_id = ?`,
+  ).run(project);
+  db.prepare(`UPDATE tasks SET column_id = (SELECT id FROM board_columns WHERE project_id = ? AND name = 'QA') WHERE id = ?`).run(
+    project,
+    id("buttons"),
+  );
 
   // Dates relative to today, so the demo always has something overdue and something due soon.
   const today = toCalendarDate(new Date());

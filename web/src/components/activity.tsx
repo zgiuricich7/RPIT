@@ -39,6 +39,7 @@ const FIELD_LABELS: Record<string, string> = {
   remindAssignee: "Reminders",
   labels: "Labels",
   notifySubtasksDone: "Prompt when subtasks are done",
+  category: "Counts as",
   color: "Colour",
   taskId: "Linked task",
   steps: "Steps",
@@ -66,8 +67,11 @@ function formatValue(a: Activity, field: string, v: FieldChange["from"], l: Look
   if (field === "color") return LABEL_COLOR_LABELS[v as LabelColor] ?? String(v);
   if (v === null || v === "") return "empty";
   if (field === "status") {
-    return a.entity === "test_case" ? TEST_STATUS_LABELS[v as TestStatus] : TASK_STATUS_LABELS[v as TaskStatus];
+    if (a.entity === "test_case") return TEST_STATUS_LABELS[v as TestStatus];
+    // Task entries hold the column's name; ones from before custom columns hold the built-in status key.
+    return TASK_STATUS_LABELS[v as TaskStatus] ?? String(v);
   }
+  if (field === "category") return TASK_STATUS_LABELS[v as TaskStatus] ?? String(v);
   if (field === "priority") return PRIORITY_LABELS[v as Priority];
   if (field === "role") return PROJECT_ROLE_LABELS[v as ProjectRole];
   return String(v);
@@ -177,6 +181,8 @@ function Sentence({ a, scope, lookup }: { a: Activity; scope: ActivityScope; loo
       }
       return <>{what} {where} the project</>;
     }
+    case "column":
+      return <>{verb} board column <b>{a.label}</b></>;
     case "label":
       return <>{verb} label <b>{a.label}</b></>;
     case "test_case":

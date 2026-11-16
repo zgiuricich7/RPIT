@@ -4,6 +4,9 @@ import { hasRole, positionBetween, type ProjectRole } from "@rpit/shared";
 import type {
   ActivityPage,
   Attachment,
+  BoardColumn,
+  ColumnInput,
+  ColumnPatch,
   Comment,
   Label,
   LabelInput,
@@ -47,6 +50,7 @@ export const keys = {
   members: (projectId: string) => ["project", projectId, "members"] as const,
   labels: (projectId: string) => ["project", projectId, "labels"] as const,
   attachments: (projectId: string) => ["project", projectId, "attachments"] as const,
+  columns: (projectId: string) => ["project", projectId, "columns"] as const,
   /** Under the project prefix, so every project mutation refreshes the logs too. */
   activity: (projectId: string, scope?: { task?: string; test?: string }) =>
     ["project", projectId, "activity", scope ?? {}] as const,
@@ -226,8 +230,9 @@ export function useUpdateTask(projectId: string) {
     onMutate: async ({ id, ...patch }) => {
       await qc.cancelQueries({ queryKey: keys.tasks(projectId) });
       const prev = qc.getQueryData<Task[]>(keys.tasks(projectId));
+      const column = columnFor(qc, projectId, patch.columnId);
       qc.setQueryData<Task[]>(keys.tasks(projectId), (list) =>
-        list?.map((t) => (t.id === id ? { ...t, ...patch } : t)),
+        list?.map((t) => (t.id === id ? { ...t, ...patch, ...(column ? { status: column.category } : {}) } : t)),
       );
       return { prev };
     },
@@ -262,7 +267,17 @@ export function useMoveTask(projectId: string) {
         } else if (parentId !== cur.parentId) {
           position = Math.max(0, ...list.map((t) => t.position)) + 1;
         }
-        const next = list.map((t) => (t.id === id ? { ...t, parentId, status: move.status ?? t.status, position } : t));
+        const column = columnFor(qc, projectId, move.columnId);
+        const next = list.map((t) =>
+          t.id === id
+            ? {
+                ...t,
+                parentId,
+                position,
+                ...(column ? { columnId: column.id, status: column.category } : { status: move.status ?? t.status }),
+              }
+            : t,
+        );
         // Same order as the server: position, then created_at, then id.
         return next.sort(
           (a, b) =>
@@ -274,6 +289,62 @@ export function useMoveTask(projectId: string) {
       return { prev };
     },
     onError: (_e, _v, ctx) => ctx?.prev && qc.setQueryData(keys.tasks(projectId), ctx.prev),
+    onSettled: () => invalidateProject(qc, projectId),
+  });
+}
+
+/** A cached board column, so optimistic updates can move a task's status along with its column. */
+const columnFor = (qc: ReturnType<typeof useQueryClient>, projectId: string, columnId: string | undefined) =>
+  columnId ? qc.getQueryData<BoardColumn[]>(keys.columns(projectId))?.find((c) => c.id === columnId) : undefined;
+
+// ---------- Board columns (custom statuses) ----------
+/** The project's board columns, left to right. Changes refresh the whole project (tasks' statuses can change). */
+export function useColumns(projectId: string) {
+  return useQuery({ queryKey: keys.columns(projectId), queryFn: () => api<BoardColumn[]>(`/projects/${projectId}/columns`) });
+}
+
+export function useCreateColumn(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ColumnInput) => api<BoardColumn>(`/projects/${projectId}/columns`, { method: "POST", body: input }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+export function useUpdateColumn(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...patch }: ColumnPatch & { id: string }) =>
+      api<BoardColumn>(`/columns/${id}`, { method: "PATCH", body: patch }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+/** Deletes a column; its tasks move to `moveTo` (required when it has any). */
+export function useDeleteColumn(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, moveTo }: { id: string; moveTo?: string }) =>
+      api<void>(`/columns/${id}${moveTo ? `?moveTo=${encodeURIComponent(moveTo)}` : ""}`, { method: "DELETE" }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+/** Sets the left-to-right order; shown right away, then refetched. */
+export function useReorderColumns(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => api<BoardColumn[]>(`/projects/${projectId}/columns/order`, { method: "PUT", body: { ids } }),
+    onMutate: async (ids) => {
+      await qc.cancelQueries({ queryKey: keys.columns(projectId) });
+      const prev = qc.getQueryData<BoardColumn[]>(keys.columns(projectId));
+      if (prev) {
+        const byId = new Map(prev.map((c) => [c.id, c]));
+        qc.setQueryData(keys.columns(projectId), ids.map((id, i) => ({ ...byId.get(id)!, position: i + 1 })));
+      }
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => ctx?.prev && qc.setQueryData(keys.columns(projectId), ctx.prev),
     onSettled: () => invalidateProject(qc, projectId),
   });
 }

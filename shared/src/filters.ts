@@ -1,5 +1,5 @@
 import { DUE_FILTERS, matchesDueFilter, type DueFilter } from "./dates.ts";
-import { PRIORITIES, TASK_STATUSES, type Priority, type Task, type TaskStatus } from "./schemas.ts";
+import { PRIORITIES, type Priority, type Task } from "./schemas.ts";
 
 /**
  * Task filters for the list and board, kept in the URL so a filtered view can
@@ -24,7 +24,11 @@ export interface TaskFilter {
   /** User ids, ASSIGNEE_ME or ASSIGNEE_NONE. */
   assignee: string[];
   priority: Priority[];
-  status: TaskStatus[];
+  /**
+   * Board column ids, or built-in statuses (TASK_STATUSES), which match every
+   * column with that category; links from before custom columns use those.
+   */
+  status: string[];
   /** Label ids or LABEL_NONE; a task matches if it has any of them. */
   label: string[];
   due: DueFilter;
@@ -48,7 +52,7 @@ export function parseTaskFilter(params: { get(name: string): string | null }): T
     q: (params.get("q") ?? "").slice(0, 200),
     assignee: list(params.get("assignee")).slice(0, 50),
     priority: allowed(list(params.get("priority")), PRIORITIES),
-    status: allowed(list(params.get("status")), TASK_STATUSES),
+    status: list(params.get("status")).slice(0, 50),
     label: list(params.get("label")).slice(0, 50),
     due: DUE_FILTERS.includes(due as DueFilter) ? (due as DueFilter) : "all",
   };
@@ -83,7 +87,7 @@ export const normalizeSearch = (s: string) =>
     .replace(/\p{Diacritic}/gu, "")
     .toLocaleLowerCase();
 
-type FilterableTask = Pick<Task, "title" | "description" | "assigneeId" | "priority" | "status" | "dueDate" | "labelIds">;
+type FilterableTask = Pick<Task, "title" | "description" | "assigneeId" | "priority" | "status" | "columnId" | "dueDate" | "labelIds">;
 
 /**
  * Returns a predicate for one filter. `userId` resolves "me"; `today` is the
@@ -96,7 +100,7 @@ export function taskMatcher(f: TaskFilter, ctx: { today: string; userId: string 
   const labels = new Set(f.label);
   const wantsNoLabels = labels.delete(LABEL_NONE);
   return (t) => {
-    if (f.status.length && !f.status.includes(t.status)) return false;
+    if (f.status.length && !f.status.includes(t.status) && !f.status.includes(t.columnId)) return false;
     if (f.priority.length && !f.priority.includes(t.priority)) return false;
     if (f.assignee.length && !(t.assigneeId ? assignees.has(t.assigneeId) : wantsNone)) return false;
     if (f.label.length && !(t.labelIds.length ? t.labelIds.some((l) => labels.has(l)) : wantsNoLabels)) return false;

@@ -5,10 +5,10 @@ import {
   PRIORITY_LABELS,
   TASK_STATUS_LABELS,
   TEST_STATUS_LABELS,
+  type BoardColumn,
   type Label,
   type Priority,
   type Task,
-  type TaskStatus,
   type TestStatus,
   type User,
 } from "@rpit/shared";
@@ -28,8 +28,14 @@ export function Modal(props: { title: string; onClose: () => void; children: Rea
   );
 }
 
-export const TaskStatusPill = ({ status }: { status: TaskStatus }) => (
-  <span className={`pill s-${status}`}>{TASK_STATUS_LABELS[status]}</span>
+/**
+ * A task's status: its board column's name, coloured by what the column counts
+ * as. Falls back to the built-in status name while columns are loading.
+ */
+export const TaskStatusPill = ({ task, columns }: { task: Pick<Task, "status" | "columnId">; columns?: BoardColumn[] }) => (
+  <span className={`pill s-${task.status}`}>
+    {columns?.find((c) => c.id === task.columnId)?.name ?? TASK_STATUS_LABELS[task.status]}
+  </span>
 );
 export const TestStatusPill = ({ status }: { status: TestStatus }) => (
   <span className={`pill s-${status}`}>{TEST_STATUS_LABELS[status]}</span>

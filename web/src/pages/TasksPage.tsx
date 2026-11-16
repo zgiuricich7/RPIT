@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useOutletContext, useSearchParams } from "react-router-dom";
 import {
   EMPTY_TASK_FILTER,
@@ -12,7 +12,8 @@ import {
   type Project,
   type TaskFilter,
 } from "@rpit/shared";
-import { useLabels, useMe, useMembers, useTasks, useUsers } from "../api/hooks.ts";
+import { useColumns, useLabels, useMe, useMembers, useTasks, useUsers } from "../api/hooks.ts";
+import { ColumnsDialog } from "../components/columns.tsx";
 import { useDialogs } from "../components/dialogs.tsx";
 import { TaskFilters } from "../components/TaskFilters.tsx";
 import { useToday } from "../components/ui.tsx";
@@ -29,6 +30,9 @@ export function TasksPage() {
   const users = useUsers().data;
   const members = useMembers(project.id).data ?? [];
   const labels = useLabels(project.id).data ?? [];
+  const columns = useColumns(project.id).data ?? [];
+  const isOwner = hasRole(project.role, "owner");
+  const [editingColumns, setEditingColumns] = useState(false);
   const meId = useMe().data?.id ?? null;
   const dialogs = useDialogs();
   const canEdit = hasRole(project.role, "editor");
@@ -45,6 +49,7 @@ export function TasksPage() {
     sort: pick(sp.get("sort"), TASK_SORTS, "manual"),
     today,
     labels,
+    columns,
   };
   const shown = useMemo(() => (tasks.data ?? []).filter(matches).length, [tasks.data, matches]);
 
@@ -92,6 +97,11 @@ export function TasksPage() {
           ))}
         </select>
         <span className="spacer" />
+        {isOwner && (
+          <button className="btn" onClick={() => setEditingColumns(true)}>
+            Edit columns
+          </button>
+        )}
         {canEdit && (
           <button className="btn primary" onClick={() => dialogs.newTask()}>
             New task
@@ -104,6 +114,7 @@ export function TasksPage() {
           onChange={setFilter}
           members={members}
           labels={labels}
+          columns={columns}
           meId={meId}
           shown={shown}
           total={tasks.data.length}
@@ -128,6 +139,9 @@ export function TasksPage() {
         <ListView projectId={project.id} tasks={tasks.data} users={users} canEdit={canEdit} opts={opts} />
       ) : (
         <BoardView projectId={project.id} tasks={tasks.data} users={users} canEdit={canEdit} opts={opts} />
+      )}
+      {editingColumns && (
+        <ColumnsDialog projectId={project.id} tasks={tasks.data ?? []} onClose={() => setEditingColumns(false)} />
       )}
     </>
   );

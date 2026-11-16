@@ -20,6 +20,7 @@ const task = (title: string, o: Partial<{ description: string; assigneeId: strin
   status: "todo" as TaskStatus,
   dueDate: null,
   labelIds: [] as string[],
+  columnId: `col-${o.status ?? "todo"}`,
   ...o,
 });
 const ctx = { today: "2026-03-10", userId: "u-me" };
@@ -55,6 +56,17 @@ describe("taskMatcher", () => {
     expect(run({ assignee: [ASSIGNEE_ME] }, tasks)).toEqual(["Fix login bug"]);
     expect(run({ assignee: [ASSIGNEE_NONE] }, tasks)).toEqual(["Login page copy", "Overdue thing"]);
     expect(run({ assignee: ["u-other", ASSIGNEE_NONE] }, tasks)).toEqual(["Write résumé page", "Login page copy", "Overdue thing"]);
+  });
+
+  it("matches status by column id or by built-in status (every column with that category)", () => {
+    const board = [
+      task("Review A", { status: "in_review" }),
+      { ...task("QA B", { status: "in_review" }), columnId: "col-qa" },
+      task("Done C", { status: "done" }),
+    ];
+    expect(run({ status: ["col-qa"] }, board)).toEqual(["QA B"]);
+    expect(run({ status: ["in_review"] }, board)).toEqual(["Review A", "QA B"]);
+    expect(run({ status: ["col-qa", "done"] }, board)).toEqual(["QA B", "Done C"]);
   });
 
   it("matches any selected label, or tasks with none", () => {

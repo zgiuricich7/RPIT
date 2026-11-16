@@ -57,7 +57,13 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
     removed with their task, test case or project, and orphaned files are swept on startup.
     Follow-up: images in Markdown (upload and embed in comments/descriptions), PDF previews, attachments on
     comments, object storage (S3) for multi-server setups, per-project storage quotas, and virus scanning.
-2.7 **Configurable board columns** per project (custom statuses).
+2.7 ~~**Configurable board columns** per project (custom statuses).~~ Done: each project has its own ordered
+    columns (new projects start with To do / In progress / In review / Done). Owners add, rename, reorder and delete
+    them ("Edit columns" on the Tasks page; deleting moves the column's tasks to another). Each column counts as one
+    of the built-in statuses, which keeps progress, overdue, reminders, roll-up prompts and the overview working;
+    a project always keeps a Done column and an open one. Status pills, the task dialog, filters and the activity
+    log use the column names. Follow-up: column colours, WIP limits, per-column task templates, and an overview
+    breakdown by column (it's by built-in status).
 
 ## 3. Testing
 

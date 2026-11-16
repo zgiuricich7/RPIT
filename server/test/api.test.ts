@@ -474,8 +474,8 @@ describe("activity log", () => {
     const items = await feed(agent, `/api/tasks/${t.id}/activity`);
     expect(brief(items)).toEqual(["comment deleted A", "comment created A", "task updated A", "task created A"]);
     expect(items[0]!.diff).toEqual({ body: { from: "Hello", to: null } });
-    expect(items[2]!.diff).toEqual({ status: { from: "todo", to: "done" }, assigneeId: { from: null, to: userId } });
-    expect(items[3]!.diff).toMatchObject({ title: { from: null, to: "A" }, status: { from: null, to: "todo" } });
+    expect(items[2]!.diff).toEqual({ status: { from: "To do", to: "Done" }, assigneeId: { from: null, to: userId } });
+    expect(items[3]!.diff).toMatchObject({ title: { from: null, to: "A" }, status: { from: null, to: "To do" } });
   });
 
   it("logs every task in a deleted subtree and the tests it unlinks", async () => {
@@ -751,7 +751,7 @@ describe("moving tasks (drag and drop)", () => {
     expect(await order(b.id)).toEqual(["C"]);
     const after = (await ctx.agent.get(`/api/tasks/${c.id}/activity`).expect(200)).body.items;
     expect(after[0].diff).toEqual({
-      status: { from: "todo", to: "in_progress" },
+      status: { from: "To do", to: "In progress" }, // column names
       parentId: { from: null, to: b.id },
     });
   });
@@ -1194,5 +1194,155 @@ describe("attachments", () => {
     fs.writeFileSync(path.join(c.dir, "README"), "not ours");
     expect(sweepOrphanUploads(c.db)).toBe(1);
     expect(c.files().sort()).toEqual(["README", kept.id].sort());
+  });
+});
+
+describe("board columns (custom statuses)", () => {
+  type Col = { id: string; name: string; category: string; position: number };
+  const columns = async () => (await ctx.agent.get(`/api/projects/${ctx.projectId}/columns`).expect(200)).body as Col[];
+  const col = async (name: string) => (await columns()).find((c) => c.name === name)!;
+  const mkTask = (body: Record<string, unknown>) =>
+    ctx.agent.post(`/api/projects/${ctx.projectId}/tasks`).send(body).expect(201).then((r) => r.body);
+  const addColumn = (name: string, category: string) =>
+    ctx.agent.post(`/api/projects/${ctx.projectId}/columns`).send({ name, category });
+
+  it("starts projects with the four default columns and places tasks by column or status", async () => {
+    expect((await columns()).map((c) => `${c.name}:${c.category}`)).toEqual([
+      "To do:todo",
+      "In progress:in_progress",
+      "In review:in_review",
+      "Done:done",
+    ]);
+    const plain = await mkTask({ title: "A" });
+    expect(plain).toMatchObject({ status: "todo", columnId: (await col("To do")).id });
+    const byStatus = await mkTask({ title: "B", status: "in_review" });
+    expect(byStatus.columnId).toBe((await col("In review")).id);
+    const byColumn = await mkTask({ title: "C", columnId: (await col("Done")).id, status: "todo" });
+    expect(byColumn.status).toBe("done"); // the column wins
+  });
+
+  it("keeps status in step with custom columns on create, edit and move", async () => {
+    const qa = (await addColumn("QA", "in_review").expect(201)).body as Col;
+    expect((await columns()).map((c) => c.name)).toEqual(["To do", "In progress", "In review", "Done", "QA"]);
+    const t = await mkTask({ title: "A" });
+    let res = await ctx.agent.patch(`/api/tasks/${t.id}`).send({ columnId: qa.id }).expect(200);
+    expect(res.body).toMatchObject({ status: "in_review", columnId: qa.id });
+    // Sending the status it already has keeps the custom column; another status picks that status's first column.
+    res = await ctx.agent.patch(`/api/tasks/${t.id}`).send({ status: "in_review", title: "A2" }).expect(200);
+    expect(res.body.columnId).toBe(qa.id);
+    res = await ctx.agent.patch(`/api/tasks/${t.id}`).send({ status: "done" }).expect(200);
+    expect(res.body.columnId).toBe((await col("Done")).id);
+    res = await ctx.agent.post(`/api/tasks/${t.id}/move`).send({ columnId: qa.id }).expect(200);
+    expect(res.body).toMatchObject({ status: "in_review", columnId: qa.id });
+
+    const items = (await ctx.agent.get(`/api/tasks/${t.id}/activity`)).body.items;
+    expect(items[0].diff.status).toEqual({ from: "Done", to: "QA" }); // logged by column name
+
+    const other = (await ctx.agent.post("/api/projects").send({ name: "P2" })).body;
+    const foreign = (await ctx.agent.get(`/api/projects/${other.id}/columns`)).body[0];
+    await ctx.agent.patch(`/api/tasks/${t.id}`).send({ columnId: foreign.id }).expect(400);
+    await ctx.agent.post(`/api/projects/${ctx.projectId}/tasks`).send({ title: "X", columnId: foreign.id }).expect(400);
+  });
+
+  it("renames, recategorises (updating its tasks) and reorders; names are unique ignoring case", async () => {
+    const review = await col("In review");
+    const t = await mkTask({ title: "A", columnId: review.id });
+    await addColumn("done", "done").expect(409);
+    await ctx.agent.patch(`/api/columns/${review.id}`).send({ name: "To Do" }).expect(409);
+    let res = await ctx.agent.patch(`/api/columns/${review.id}`).send({ name: "Ready", category: "done" }).expect(200);
+    expect(res.body).toMatchObject({ name: "Ready", category: "done" });
+    expect((await ctx.agent.get(`/api/tasks/${t.id}`)).body.status).toBe("done");
+    expect((await ctx.agent.get(`/api/projects/${ctx.projectId}/summary`)).body.percentComplete).toBe(100);
+
+    const ids = (await columns()).map((c) => c.id);
+    const reversed = [...ids].reverse();
+    res = await ctx.agent.put(`/api/projects/${ctx.projectId}/columns/order`).send({ ids: reversed }).expect(200);
+    expect(res.body.map((c: Col) => c.id)).toEqual(reversed);
+    await ctx.agent.put(`/api/projects/${ctx.projectId}/columns/order`).send({ ids: reversed.slice(1) }).expect(400);
+    await ctx.agent.put(`/api/projects/${ctx.projectId}/columns/order`).send({ ids: [...reversed, ids[0]] }).expect(400);
+    // A task with no column or status now goes in the first column (Done, after the reversal).
+    expect((await mkTask({ title: "B" })).status).toBe("done");
+
+    const log = (await ctx.agent.get(`/api/projects/${ctx.projectId}/activity`)).body.items;
+    const entry = log.find((e: { entity: string }) => e.entity === "column");
+    expect(entry).toMatchObject({ action: "updated", label: "Ready" });
+    expect(entry.diff).toEqual({ name: { from: "In review", to: "Ready" }, category: { from: "in_review", to: "done" } });
+  });
+
+  it("deletes a column, moving its tasks; keeps a Done column and an open one", async () => {
+    const progress = await col("In progress");
+    const todo = await col("To do");
+    const done = await col("Done");
+    const t = await mkTask({ title: "A", columnId: progress.id });
+    let res = await ctx.agent.delete(`/api/columns/${progress.id}`).expect(400);
+    expect(res.body.fieldErrors.moveTo).toBeDefined();
+    await ctx.agent.delete(`/api/columns/${progress.id}?moveTo=${progress.id}`).expect(400);
+    await ctx.agent.delete(`/api/columns/${progress.id}?moveTo=${todo.id}`).expect(204);
+    expect((await ctx.agent.get(`/api/tasks/${t.id}`)).body).toMatchObject({ columnId: todo.id, status: "todo" });
+    const items = (await ctx.agent.get(`/api/tasks/${t.id}/activity`)).body.items;
+    expect(items[0].diff).toEqual({ status: { from: "In progress", to: "To do" } });
+
+    await ctx.agent.delete(`/api/columns/${done.id}`).expect(400); // the only Done column
+    await ctx.agent.patch(`/api/columns/${done.id}`).send({ category: "todo" }).expect(400);
+    await ctx.agent.delete(`/api/columns/${(await col("In review")).id}`).expect(204); // empty: no moveTo needed
+    res = await ctx.agent.delete(`/api/columns/${todo.id}?moveTo=${done.id}`).expect(400); // the last open one
+    expect(res.body.error).toMatch(/isn't Done/);
+    await ctx.agent.patch(`/api/columns/${todo.id}`).send({ category: "done" }).expect(400);
+
+    // A status with no column of that kind is a clear 400.
+    res = await ctx.agent.post(`/api/projects/${ctx.projectId}/tasks`).send({ title: "X", status: "in_review" }).expect(400);
+    expect(res.body.error).toMatch(/no column that counts as "In review"/);
+  });
+
+  it("lets only owners change columns; editors still move tasks between them", async () => {
+    const editor = await signUp(ctx.db, "Ed", "ed@x.com");
+    await ctx.agent.post(`/api/projects/${ctx.projectId}/members`).send({ email: "ed@x.com", role: "editor" }).expect(201);
+    const done = await col("Done");
+    await editor.get(`/api/projects/${ctx.projectId}/columns`).expect(200);
+    await editor.post(`/api/projects/${ctx.projectId}/columns`).send({ name: "QA", category: "in_review" }).expect(403);
+    await editor.patch(`/api/columns/${done.id}`).send({ name: "Shipped" }).expect(403);
+    await editor.delete(`/api/columns/${done.id}`).expect(403);
+    await editor.put(`/api/projects/${ctx.projectId}/columns/order`).send({ ids: [done.id] }).expect(403);
+    const t = await mkTask({ title: "A" });
+    await editor.post(`/api/tasks/${t.id}/move`).send({ columnId: done.id }).expect(200);
+  });
+
+  it("prompts parents when recategorising a column finishes their subtasks, and survives project deletion", async () => {
+    const parent = await mkTask({ title: "P", assigneeId: ctx.userId });
+    const review = await col("In review");
+    await mkTask({ title: "C", parentId: parent.id, columnId: review.id });
+    await ctx.agent.patch(`/api/columns/${review.id}`).send({ category: "done" }).expect(200);
+    const inbox = (await ctx.agent.get("/api/notifications")).body.items;
+    expect(inbox.map((n: { kind: string; taskId: string }) => `${n.kind} ${n.taskId}`)).toContain(`subtasks_done ${parent.id}`);
+
+    await ctx.agent.delete(`/api/projects/${ctx.projectId}`).expect(204);
+    expect(ctx.db.prepare(`SELECT COUNT(*) AS n FROM board_columns`).get()).toEqual({ n: 0 });
+  });
+});
+
+describe("migration 10 (board columns)", () => {
+  it("gives existing projects the default columns and puts tasks in the one for their status", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const { migrations } = await import("../src/db/migrations.ts");
+    const { migrate } = await import("../src/db/index.ts");
+    const db = new DatabaseSync(":memory:");
+    db.exec("PRAGMA foreign_keys = ON");
+    for (const m of migrations.slice(0, 9)) db.exec(m);
+    db.exec("PRAGMA user_version = 9");
+    db.exec(`INSERT INTO projects (id, name) VALUES ('p1', 'One'), ('p2', 'Two')`);
+    db.exec(`INSERT INTO tasks (id, project_id, title, status) VALUES ('t1', 'p1', 'A', 'in_review'), ('t2', 'p2', 'B', 'done')`);
+    migrate(db);
+
+    const cols = db.prepare(`SELECT project_id, name, category FROM board_columns ORDER BY project_id, position`).all();
+    expect(cols).toHaveLength(8);
+    const placed = db
+      .prepare(`SELECT t.id, c.name, c.project_id FROM tasks t JOIN board_columns c ON c.id = t.column_id ORDER BY t.id`)
+      .all();
+    expect(placed).toEqual([
+      { id: "t1", name: "In review", project_id: "p1" },
+      { id: "t2", name: "Done", project_id: "p2" },
+    ]);
+    const ids = db.prepare(`SELECT id FROM board_columns`).all() as { id: string }[];
+    expect(ids.every((r) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(r.id))).toBe(true);
   });
 });
