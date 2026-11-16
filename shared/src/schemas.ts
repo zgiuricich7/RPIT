@@ -279,7 +279,7 @@ export type NotificationPatch = z.infer<typeof NotificationPatch>;
 
 // ---------- Activity log ----------
 export const ACTIVITY_ENTITIES = ["project", "member", "task", "comment", "test_case", "label", "attachment", "column", "test_run",
-  "test_suite"] as const;
+  "test_suite", "test_plan"] as const;
 export const ACTIVITY_ACTIONS = ["created", "updated", "deleted"] as const;
 export const ActivityEntity = z.enum(ACTIVITY_ENTITIES);
 export const ActivityAction = z.enum(ACTIVITY_ACTIONS);
@@ -297,6 +297,34 @@ export const TestSuiteInput = z.object({
 export const TestSuitePatch = z.object({ name: suiteName, description: longText, parentId: nullableId }).partial();
 export type TestSuiteInput = z.input<typeof TestSuiteInput>;
 export type TestSuitePatch = z.infer<typeof TestSuitePatch>;
+
+// ---------- Test plans (cycles) ----------
+/**
+ * A named set of test cases to execute for a release. Runs can be recorded "in"
+ * a plan; a test's result in the plan is its latest run in that plan, so each
+ * cycle starts from Not run. Closing a plan freezes it.
+ */
+const testCaseIds = z.array(id).max(1000);
+export const TestPlanInput = z.object({
+  name: z.string().trim().min(1, "Name is required").max(120),
+  description: longText.default(""),
+  dueDate: calendarDate.default(null),
+  testCaseIds: testCaseIds.default([]),
+});
+export const TestPlanPatch = z
+  .object({
+    name: z.string().trim().min(1, "Name is required").max(120),
+    description: longText,
+    dueDate: calendarDate,
+    /** Close (true) or reopen (false). */
+    closed: z.boolean(),
+  })
+  .partial();
+/** Add these test cases to a plan (ones already in it are ignored). */
+export const TestPlanTests = z.object({ testCaseIds: testCaseIds.min(1, "Choose at least one test case") });
+export type TestPlanInput = z.input<typeof TestPlanInput>;
+export type TestPlanPatch = z.infer<typeof TestPlanPatch>;
+export type TestPlanTests = z.infer<typeof TestPlanTests>;
 
 // ---------- Test cases ----------
 /**
@@ -343,6 +371,8 @@ export type TestCaseInput = z.input<typeof TestCaseInput>;
 export const TestRunInput = z.object({
   status: TestStatus,
   notes: longText.default(""),
+  /** Record it as part of this test plan (the test must be in the plan, and the plan open). */
+  planId: id.optional(),
 });
 export type TestRunInput = z.input<typeof TestRunInput>;
 export type TestCasePatch = z.infer<typeof TestCasePatch>;
@@ -502,6 +532,43 @@ export function stepsToText(steps: TestStep[]): string {
     .join("\n");
 }
 
+/** Counts by result and pass rate (passed / run, excluding not run) for a set of tests. */
+export interface TestProgress {
+  total: number;
+  byStatus: Record<TestStatus, number>;
+  passRate: number | null;
+}
+
+export interface TestPlan {
+  id: string;
+  projectId: string;
+  name: string;
+  /** Markdown. */
+  description: string;
+  /** Target date for the cycle ("YYYY-MM-DD"). */
+  dueDate: string | null;
+  /** Set when the plan was closed; closed plans don't take new runs or tests. */
+  closedAt: string | null;
+  /** Results of the plan's tests within this plan. */
+  progress: TestProgress;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A test case in a plan, with its result in that plan. */
+export interface TestPlanItem {
+  testCaseId: string;
+  /** Latest run in this plan; not_run until one is recorded. */
+  status: TestStatus;
+  lastRunAt: string | null;
+  lastRunByName: string | null;
+  addedAt: string;
+}
+
+export interface TestPlanDetail extends TestPlan {
+  items: TestPlanItem[];
+}
+
 /** A folder of test cases, possibly inside another suite. */
 export interface TestSuite {
   id: string;
@@ -518,6 +585,9 @@ export interface TestSuite {
 export interface TestRun {
   id: string;
   testCaseId: string;
+  /** The test plan it was recorded in, if any (null if the plan was deleted). */
+  planId: string | null;
+  planName: string | null;
   status: TestStatus;
   /** Null if their account was deleted, or for runs carried over from before run history. */
   runById: string | null;

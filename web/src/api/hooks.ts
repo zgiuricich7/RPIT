@@ -30,6 +30,10 @@ import type {
   TestCase,
   TestCaseInput,
   TestCasePatch,
+  TestPlan,
+  TestPlanDetail,
+  TestPlanInput,
+  TestPlanPatch,
   TestRun,
   TestRunInput,
   TestSuite,
@@ -58,6 +62,8 @@ export const keys = {
   columns: (projectId: string) => ["project", projectId, "columns"] as const,
   testRuns: (projectId: string, testId: string) => ["project", projectId, "test-runs", testId] as const,
   suites: (projectId: string) => ["project", projectId, "suites"] as const,
+  plans: (projectId: string) => ["project", projectId, "plans"] as const,
+  plan: (projectId: string, planId: string) => ["project", projectId, "plans", planId] as const,
   /** Under the project prefix, so every project mutation refreshes the logs too. */
   activity: (projectId: string, scope?: { task?: string; test?: string }) =>
     ["project", projectId, "activity", scope ?? {}] as const,
@@ -532,6 +538,73 @@ export function useDeleteSuite(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api<void>(`/suites/${id}`, { method: "DELETE" }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+// ---------- Test plans ----------
+/** The project's test plans with progress: open ones first. */
+export function usePlans(projectId: string) {
+  return useQuery({ queryKey: keys.plans(projectId), queryFn: () => api<TestPlan[]>(`/projects/${projectId}/plans`) });
+}
+
+/** One plan with each test's result in it. Pass an empty id to skip loading. */
+export function usePlan(projectId: string, planId: string | null | undefined) {
+  return useQuery({
+    queryKey: keys.plan(projectId, planId ?? ""),
+    queryFn: () => api<TestPlanDetail>(`/plans/${planId}`),
+    enabled: !!planId,
+  });
+}
+
+export function useCreatePlan(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: TestPlanInput) => api<TestPlanDetail>(`/projects/${projectId}/plans`, { method: "POST", body: input }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+export function useUpdatePlan(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...patch }: TestPlanPatch & { id: string }) =>
+      api<TestPlanDetail>(`/plans/${id}`, { method: "PATCH", body: patch }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+export function useDeletePlan(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<void>(`/plans/${id}`, { method: "DELETE" }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+export function useAddPlanTests(projectId: string, planId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (testCaseIds: string[]) =>
+      api<TestPlanDetail>(`/plans/${planId}/tests`, { method: "POST", body: { testCaseIds } }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+export function useRemovePlanTest(projectId: string, planId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (testId: string) => api<TestPlanDetail>(`/plans/${planId}/tests/${testId}`, { method: "DELETE" }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+/** Record a run of any test (quick results on a plan). */
+export function useRecordRun(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ testId, ...input }: TestRunInput & { testId: string }) =>
+      api<TestRun>(`/tests/${testId}/runs`, { method: "POST", body: input }),
     onSuccess: () => invalidateProject(qc, projectId),
   });
 }

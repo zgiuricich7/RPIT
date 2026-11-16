@@ -84,16 +84,26 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
     nothing was lost. Step changes are logged as a numbered list.
     Follow-up: record a result per step in a run (and which step failed), copy steps from another test, and
     shared steps reused across tests.
-3.4 **Test plans / cycles**: a named set of tests to execute for a release, with progress.
+3.4 ~~**Test plans / cycles**~~ Done: a Test plans page lists plans (name, target date, open/closed) with progress;
+    a plan holds a set of test cases (added one by one or a whole suite at a time) and shows each test's result in
+    that plan, with one-click Passed/Failed/Blocked buttons. Runs recorded in a plan (also from the test dialog when
+    opened from the plan) count for that plan only, so each cycle starts fresh, while still setting the test's
+    overall status. Closing a plan freezes it; deleting it keeps the runs. Open plans show on the overview.
+    Follow-up: copy a plan for the next cycle (optionally only failed tests), per-test assignees within a plan,
+    comparing two cycles, and a printable/exportable plan report.
 3.5 **Coverage view**: tasks with no linked tests, and roll-up of test status onto tasks.
 3.6 **Import results** from CI (JUnit XML) via an API token.
 
-## 4. Platform
+## 4. Dashboard
 
-4.1 **Postgres support** (keep SQL portable; consider Drizzle or Kysely as a query layer).
-4.2 **Rate limiting and CSRF hardening** (SameSite=Lax cookies are the current CSRF defence).
-4.3 **Password reset** and email verification.
-4.4 **OAuth sign-in** (Google, GitHub).
-4.5 **Dockerfile and deployment guide**; health check is at `/api/health`.
-4.6 **End-to-end tests** with Playwright covering sign-in, nesting, board moves, comments, tests.
-4.7 **CI**: GitHub Actions running typecheck, unit/API tests and e2e.
+4.1 **Homepage Support** Users should be routed to a homepage by default that provides a dashboard for all of their active projects. Clicking the home button in the navbar should return to the homepage
+
+## 5. Platform
+
+5.1 **Postgres support** (keep SQL portable; consider Drizzle or Kysely as a query layer).
+5.2 **Rate limiting and CSRF hardening** (SameSite=Lax cookies are the current CSRF defence).
+5.3 **Password reset** and email verification.
+5.4 **OAuth sign-in** (Google, GitHub).
+5.5 **Dockerfile and deployment guide**; health check is at `/api/health`.
+5.6 **End-to-end tests** with Playwright covering sign-in, nesting, board moves, comments, tests.
+5.7 **CI**: GitHub Actions running typecheck, unit/API tests and e2e.

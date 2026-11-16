@@ -499,4 +499,60 @@ export const migrations: string[] = [
   ALTER TABLE test_cases DROP COLUMN steps;
   ALTER TABLE test_cases DROP COLUMN expected;
   `,
+
+  /* 14: test plans / cycles */ `
+  CREATE TABLE test_plans (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    due_date    TEXT CHECK (due_date IS NULL OR due_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+    closed_at   TEXT,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE INDEX idx_plans_project ON test_plans(project_id);
+
+  CREATE TABLE test_plan_items (
+    plan_id      TEXT NOT NULL REFERENCES test_plans(id) ON DELETE CASCADE,
+    test_case_id TEXT NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
+    added_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    PRIMARY KEY (plan_id, test_case_id)
+  );
+  CREATE INDEX idx_plan_items_test ON test_plan_items(test_case_id);
+
+  -- Runs recorded in a plan. Deleting the plan keeps the runs (they're still the test's history).
+  ALTER TABLE test_runs ADD COLUMN plan_id TEXT REFERENCES test_plans(id) ON DELETE SET NULL;
+  CREATE INDEX idx_test_runs_plan ON test_runs(plan_id, test_case_id);
+
+  -- Recreate activity to widen the entity CHECK with 'test_plan' (same steps as migration 7).
+  DROP TRIGGER activity_no_update;
+  DROP TRIGGER activity_no_delete;
+  CREATE TABLE activity_new (
+    id         TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    actor_id   TEXT REFERENCES users(id) ON DELETE SET NULL,
+    entity     TEXT NOT NULL CHECK (entity IN ('project','member','task','comment','test_case','label','attachment',
+                                               'column','test_run','test_suite','test_plan')),
+    entity_id  TEXT NOT NULL,
+    task_id    TEXT,
+    action     TEXT NOT NULL CHECK (action IN ('created','updated','deleted')),
+    label      TEXT NOT NULL DEFAULT '',
+    diff       TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  INSERT INTO activity_new (rowid, id, project_id, actor_id, entity, entity_id, task_id, action, label, diff, created_at)
+    SELECT rowid, id, project_id, actor_id, entity, entity_id, task_id, action, label, diff, created_at FROM activity;
+  DROP TABLE activity;
+  ALTER TABLE activity_new RENAME TO activity;
+  CREATE INDEX idx_activity_project ON activity(project_id);
+  CREATE INDEX idx_activity_task ON activity(task_id);
+  CREATE INDEX idx_activity_entity ON activity(entity, entity_id);
+  CREATE TRIGGER activity_no_update
+  BEFORE UPDATE OF id, project_id, entity, entity_id, task_id, action, label, diff, created_at ON activity
+  BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
+  CREATE TRIGGER activity_no_delete
+  BEFORE DELETE ON activity
+  BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
+  `,
 ];

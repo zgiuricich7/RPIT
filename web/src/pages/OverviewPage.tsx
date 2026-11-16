@@ -15,6 +15,7 @@ import {
 import {
   useColumns,
   useDeleteProject,
+  usePlans,
   useProjectActivity,
   useProjectSummary,
   useProjects,
@@ -29,6 +30,7 @@ import { CommentBody, MarkdownView } from "../components/markdown.tsx";
 import { DueDate, Meter, Stack, TaskStatusPill, TestStatusPill, useToday } from "../components/ui.tsx";
 import { formatDateTime } from "../lib/format.ts";
 import { TEST_COLORS } from "./TestsPage.tsx";
+import { progressText } from "./PlansPage.tsx";
 
 const TASK_COLORS: Record<TaskStatus, string> = {
   todo: "var(--todo)",
@@ -44,6 +46,7 @@ export function OverviewPage() {
   const summary = useProjectSummary(project.id).data;
   const tasks = useTasks(project.id).data ?? [];
   const columns = useColumns(project.id).data;
+  const openPlans = (usePlans(project.id).data ?? []).filter((p) => !p.closedAt);
   const tests = useTests(project.id).data ?? [];
   const recent = useRecentComments(project.id).data ?? [];
   const projects = useProjects().data ?? [];
@@ -205,6 +208,21 @@ export function OverviewPage() {
           </div>
         </div>
       </div>
+
+      {openPlans.length > 0 && (
+        <div className="panel">
+          <h3>Open test plans</h3>
+          {openPlans.map((p) => (
+            <div className="prow" key={p.id}>
+              <button className="title-btn" onClick={() => navigate(`/projects/${project.id}/plans?plan=${p.id}`)}>
+                {p.name}
+              </button>
+              <span className="muted">{p.progress.total ? progressText(p.progress) : "No tests yet"}</span>
+              {p.dueDate && <DueDate task={{ status: "todo", dueDate: p.dueDate }} today={today} />}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="panel">
         <Attachments projectId={project.id} canEdit={project.role !== "viewer"} heading="Project files" />

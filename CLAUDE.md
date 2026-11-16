@@ -64,7 +64,8 @@ web/      React 19 + Vite + TanStack Query + React Router 7
   src/components/testSteps.tsx    StepsEditor: ordered action/expected rows (read-only view renders Markdown)
   src/components/suites.tsx       SuiteSidebar (tree + pass rates on the Tests page), SuiteDialog, SuiteOptions
   src/components/labels.tsx    LabelPicker (toggle chips + create) for the task dialog; LabelChip/TaskLabels are in ui.tsx
-  src/pages/          Overview, Tasks (List + Board; filters and sort in the URL), Tests, Labels, Members, Inbox, Auth
+  src/pages/          Overview, Tasks (List + Board; filters and sort in the URL), Tests, Plans (list, ?plan=<id> detail),
+                      Labels, Members, Inbox, Auth
   src/components/TaskFilters.tsx  search box ("/" focuses it) + assignee/priority/status/label/due filter menus
   src/pages/taskViews.tsx  List and Board views with @dnd-kit drag and drop (mouse, touch, keyboard)
   src/styles.css      design tokens (light/dark) and all styles; plain CSS, no framework
@@ -112,6 +113,14 @@ docs/ROADMAP.md       prioritised backlog
   (`setTestSteps`), leaving it out keeps it. A step needs an action or an expected result. The log records steps
   as one numbered Markdown list (`stepsToText`, via `auditedTest`). Steps are Markdown but edited in plain
   auto-growing textareas (a toolbar per field would be too heavy); they render with `MarkdownView`.
+- `test_plans(project_id, name, description, due_date, closed_at)` + `test_plan_items(plan_id, test_case_id)` — test
+  plans / cycles (both cascade). `test_runs.plan_id` (SET NULL) records a run *in* a plan: a test's result in a
+  plan is its latest run with that plan id (`planItems` in `server/src/routes/plans.ts`), so each cycle starts from
+  Not run, while every run still sets the test's overall status. Plan progress uses `testStats` (same pass-rate
+  definition everywhere). Recording a run with `planId` requires the plan to be open and contain the test
+  (`checkPlanRun`); closed plans also refuse membership changes. Deleting a plan keeps its runs. Membership changes
+  are logged on the plan as `testsAdded` / `testsRemoved` (titles). The test dialog records into the plan when
+  opened from the Plans page (`?plan=<id>` in the URL).
 - `test_runs(test_case_id, status, run_by, notes, created_at)` — run history (cascades from the test case,
   `run_by` SET NULL). **`test_cases.status` is a cache of the newest run's status** (`not_run` with no runs),
   maintained by `recordTestRun` / `syncTestStatus` in `server/src/routes/tests.ts`; every write to `test_runs`
@@ -197,7 +206,7 @@ docs/ROADMAP.md       prioritised backlog
   tasks when a label is deleted). Task diffs go through `auditedTask(db, task)`, which adds `labels` as the
   joined label names and replaces `status` with the column's name, so history keeps the names as they were
   (entries from before custom columns hold the status key; the feed shows both). New tracked fields
-  go in `TASK_FIELDS` / `TEST_FIELDS` / `PROJECT_FIELDS` / `LABEL_FIELDS` / `COLUMN_FIELDS` / `SUITE_FIELDS`
+  go in `TASK_FIELDS` / `TEST_FIELDS` / `PROJECT_FIELDS` / `LABEL_FIELDS` / `COLUMN_FIELDS` / `SUITE_FIELDS` / `PLAN_FIELDS`
   (test status isn't in `TEST_FIELDS`: it's logged as `test_run` entries, which carry `testCaseId` in the diff), plus a label in `web/src/components/activity.tsx`.
   Adding an entity or action type needs a new migration that recreates the CHECK.
 - **Notifications are in-app only** (no email). Create them with `notify` / `notifyAssignment` /

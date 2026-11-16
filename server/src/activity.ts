@@ -58,6 +58,7 @@ export const auditedTest = (t: TestCase): AuditedTest => ({ ...t, steps: stepsTo
 /** No `status`: it changes only through test runs, which have their own entries (entity `test_run`). */
 export const TEST_FIELDS = ["title", "suiteId", "priority", "assigneeId", "taskId", "steps", "notes"] as const;
 export const SUITE_FIELDS = ["name", "description", "parentId"] as const;
+export const PLAN_FIELDS = ["name", "description", "dueDate", "closedAt"] as const;
 export const TEST_RUN_FIELDS = ["status", "notes", "testCaseId"] as const;
 export const PROJECT_FIELDS = ["name", "description", "notifySubtasksDone"] as const;
 export const LABEL_FIELDS = ["name", "color"] as const;

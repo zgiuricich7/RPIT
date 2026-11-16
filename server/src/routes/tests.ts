@@ -11,6 +11,7 @@ import { auditedTest, changes, logActivity, snapshot, TEST_FIELDS } from "../act
 import { activityPage } from "./activity.ts";
 import { checkAssignee } from "./tasks.ts";
 import { checkSuite } from "./suites.ts";
+import { checkPlanRun } from "./plans.ts";
 import { attachmentIds, removeFilesAfterCommit } from "../uploads.ts";
 
 const byTestRun: ProjectResolver = {
@@ -39,18 +40,13 @@ function syncTestStatus(db: DB, testCaseId: string) {
 export function recordTestRun(
   db: DB,
   t: Pick<TestCase, "id" | "projectId" | "title" | "status">,
-  run: { status: TestStatus; notes: string },
+  run: { status: TestStatus; notes: string; planId?: string },
   actorId: string,
 ): string {
   const id = newId();
-  db.prepare(`INSERT INTO test_runs (id, test_case_id, status, run_by, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)`).run(
-    id,
-    t.id,
-    run.status,
-    actorId,
-    run.notes,
-    now(),
-  );
+  db.prepare(
+    `INSERT INTO test_runs (id, test_case_id, status, run_by, notes, plan_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, t.id, run.status, actorId, run.notes, run.planId ?? null, now());
   syncTestStatus(db, t.id);
   logActivity(db, {
     projectId: t.projectId,
@@ -63,6 +59,7 @@ export function recordTestRun(
       status: { from: t.status, to: run.status },
       notes: { from: null, to: run.notes },
       testCaseId: { from: null, to: t.id },
+      ...(run.planId ? { planId: { from: null, to: run.planId } } : {}),
     },
   });
   return id;
@@ -213,6 +210,7 @@ export function testCaseRoutes(db: DB) {
   byId.post("/:testId/runs", can("editor", byTestCase), (req, res) => {
     const t = get(param(req, "testId"));
     const run = parseBody(TestRunInput, req.body);
+    if (run.planId) checkPlanRun(db, t, run.planId);
     const id = transaction(db, () => recordTestRun(db, t, run, currentUser(req).id));
     res.status(201).json(getRun(id));
   });

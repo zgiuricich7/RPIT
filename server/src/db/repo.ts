@@ -185,6 +185,8 @@ export const toTestSuite = (r: Row): TestSuite => ({
 export const toTestRun = (r: Row): TestRun => ({
   id: r.id as string,
   testCaseId: r.test_case_id as string,
+  planId: (r.plan_id as string | null) ?? null,
+  planName: (r.plan_name as string | null) ?? null,
   status: r.status as TestRun["status"],
   runById: (r.run_by as string | null) ?? null,
   runByName: (r.run_by_name as string | null) ?? null,
@@ -192,9 +194,10 @@ export const toTestRun = (r: Row): TestRun => ({
   createdAt: r.created_at as string,
 });
 
-/** Runs with the runner's name, newest first when ordered by `r.created_at DESC, r.rowid DESC`. */
+/** Runs with the runner's and plan's names, newest first when ordered by `r.created_at DESC, r.rowid DESC`. */
 export const TEST_RUN_SELECT = `
-  SELECT r.*, u.name AS run_by_name FROM test_runs r LEFT JOIN users u ON u.id = r.run_by`;
+  SELECT r.*, u.name AS run_by_name, p.name AS plan_name
+  FROM test_runs r LEFT JOIN users u ON u.id = r.run_by LEFT JOIN test_plans p ON p.id = r.plan_id`;
 
 /** Tasks with their comment count and label ids (as JSON, in label name order). */
 export const TASK_SELECT = `

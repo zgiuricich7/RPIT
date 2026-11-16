@@ -165,6 +165,23 @@ main.page { padding: 20px; max-width: 1400px; margin: 0 auto; }
   .steps-edit li > textarea[data-field="expected"], .steps-edit .step-tools { grid-column: 2; }
 }
 
+/* ---------- Test plans ---------- */
+.plan-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.plan-card { text-align: left; font: inherit; color: inherit; cursor: pointer; display: grid; gap: 8px; }
+.plan-card h3 { margin: 0; display: flex; gap: 8px; align-items: center; }
+.plan-card .stack { margin: 0; }
+.plan-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--mute); }
+.plan-state { font-size: 11px; padding: 0 7px; border-radius: 99px; border: 1px solid currentColor; font-weight: 500; }
+.plan-state.open { color: var(--prog); }
+.plan-state.closed { color: var(--mute); }
+.plan-chip { font-size: 11px; margin-left: 6px; padding: 0 6px; border-radius: 99px; background: var(--bg); border: 1px solid var(--line); color: var(--mute); }
+.quick-run { display: inline-flex; gap: 4px; }
+.quick-run .btn { min-width: 30px; }
+.run-submit { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.add-tests-list { max-height: 50vh; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 10px; }
+.add-tests-list .suite-group { font-size: 12px; color: var(--mute); margin: 8px 0 2px; font-weight: 600; }
+.add-tests-list label.check { color: var(--ink); padding: 2px 0; }
+
 /* ---------- Test suites ---------- */
 .tests-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: start; }
 .tests-main { min-width: 0; }

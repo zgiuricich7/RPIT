@@ -168,6 +168,21 @@ transaction(db, () => {
   insertRun.run(newId(), buttonsTest, "passed", priya, "Checked in Chrome and Safari.", daysAgo(1));
   insertRun.run(newId(), tableTest, "passed", maya, "", daysAgo(6));
   insertRun.run(newId(), tableTest, "failed", priya, "Sort order reverses on the second click.", daysAgo(2));
+
+  // An open test plan for the launch, part-way through.
+  const plan = newId();
+  db.prepare(`INSERT INTO test_plans (id, project_id, name, description, due_date) VALUES (?, ?, ?, ?, ?)`).run(
+    plan,
+    project,
+    "Launch readiness",
+    "Everything that must pass before the redesign goes live.",
+    addDays(today, 14),
+  );
+  const addToPlan = db.prepare(`INSERT INTO test_plan_items (plan_id, test_case_id) VALUES (?, ?)`);
+  for (const t of [buttonsTest, tableTest, legacyTest]) addToPlan.run(plan, t);
+  db.prepare(
+    `INSERT INTO test_runs (id, test_case_id, status, run_by, notes, plan_id, created_at) VALUES (?, ?, 'passed', ?, '', ?, ?)`,
+  ).run(newId(), buttonsTest, priya, plan, new Date().toISOString());
 });
 
 console.log("Seeded demo data. Sign in with demo@rpit.dev / rpit-demo");

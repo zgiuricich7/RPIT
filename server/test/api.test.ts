@@ -1610,3 +1610,106 @@ describe("migration 13 (structured steps)", () => {
     expect(cols).not.toContain("expected");
   });
 });
+
+describe("test plans (cycles)", () => {
+  type Item = { testCaseId: string; status: string; lastRunByName: string | null };
+  type Plan = { id: string; name: string; closedAt: string | null; progress: { total: number; passRate: number | null; byStatus: Record<string, number> }; items: Item[] };
+  const mkTest = (title: string, body: Record<string, unknown> = {}) =>
+    ctx.agent.post(`/api/projects/${ctx.projectId}/tests`).send({ title, ...body }).expect(201).then((r) => r.body as { id: string });
+  const mkPlan = (body: Record<string, unknown>) =>
+    ctx.agent.post(`/api/projects/${ctx.projectId}/plans`).send(body).expect(201).then((r) => r.body as Plan);
+  const plan = async (id: string) => (await ctx.agent.get(`/api/plans/${id}`).expect(200)).body as Plan;
+  const run = (testId: string, status: string, planId?: string) =>
+    ctx.agent.post(`/api/tests/${testId}/runs`).send({ status, planId });
+
+  it("tracks each test's result within the plan, separately from earlier runs", async () => {
+    const a = await mkTest("Login", { status: "passed" }); // passed before the cycle
+    const b = await mkTest("Signup");
+    const c = await mkTest("Logout");
+    const p = await mkPlan({ name: "Release 1.2", dueDate: "2026-12-01", testCaseIds: [a.id, b.id, a.id] });
+    expect(p.items.map((i) => `${i.testCaseId === a.id ? "Login" : "Signup"}:${i.status}`)).toEqual(["Login:not_run", "Signup:not_run"]);
+    expect(p.progress).toMatchObject({ total: 2, passRate: null });
+
+    await run(a.id, "failed", p.id).expect(201);
+    await run(b.id, "passed", p.id).expect(201);
+    await run(b.id, "passed").expect(201); // outside the plan: doesn't count for it
+    let detail = await plan(p.id);
+    expect(detail.progress).toMatchObject({ total: 2, passRate: 50, byStatus: { passed: 1, failed: 1, blocked: 0, not_run: 0 } });
+    expect(detail.items.find((i) => i.testCaseId === a.id)).toMatchObject({ status: "failed", lastRunByName: "Tester" });
+    // The run still sets the test's overall status, and the timeline shows which plan it was in.
+    expect((await ctx.agent.get(`/api/tests/${a.id}`)).body.status).toBe("failed");
+    expect((await ctx.agent.get(`/api/tests/${a.id}/runs`)).body[0]).toMatchObject({ planId: p.id, planName: "Release 1.2" });
+
+    // A test not in the plan can't be run in it until it's added.
+    await run(c.id, "passed", p.id).expect(400);
+    detail = (await ctx.agent.post(`/api/plans/${p.id}/tests`).send({ testCaseIds: [c.id, a.id] }).expect(200)).body;
+    expect(detail.items).toHaveLength(3);
+    await run(c.id, "passed", p.id).expect(201);
+    detail = (await ctx.agent.delete(`/api/plans/${p.id}/tests/${b.id}`).expect(200)).body;
+    expect(detail.progress).toMatchObject({ total: 2, passRate: 50 });
+    await ctx.agent.delete(`/api/plans/${p.id}/tests/${b.id}`).expect(404);
+
+    const list = (await ctx.agent.get(`/api/projects/${ctx.projectId}/plans`).expect(200)).body as Plan[];
+    expect(list.map((x) => x.name)).toEqual(["Release 1.2"]);
+    expect(list[0]!.progress.total).toBe(2);
+  });
+
+  it("closing freezes a plan; reopening allows runs again", async () => {
+    const a = await mkTest("A");
+    const b = await mkTest("B");
+    const p = await mkPlan({ name: "Cycle", testCaseIds: [a.id] });
+    const closed = (await ctx.agent.patch(`/api/plans/${p.id}`).send({ closed: true }).expect(200)).body as Plan;
+    expect(closed.closedAt).toEqual(expect.any(String));
+    await run(a.id, "passed", p.id).expect(400);
+    await ctx.agent.post(`/api/plans/${p.id}/tests`).send({ testCaseIds: [b.id] }).expect(400);
+    await ctx.agent.delete(`/api/plans/${p.id}/tests/${a.id}`).expect(400);
+    await ctx.agent.patch(`/api/plans/${p.id}`).send({ name: "Cycle 1" }).expect(200); // details can still change
+    const reopened = (await ctx.agent.patch(`/api/plans/${p.id}`).send({ closed: false }).expect(200)).body as Plan;
+    expect(reopened.closedAt).toBeNull();
+    await run(a.id, "passed", p.id).expect(201);
+
+    const log = (await ctx.agent.get(`/api/projects/${ctx.projectId}/activity`)).body.items as { entity: string; action: string; diff: Record<string, unknown> }[];
+    const planLog = log.filter((e) => e.entity === "test_plan");
+    expect(planLog[0]!.diff).toEqual({ closedAt: { from: closed.closedAt, to: null } });
+    expect(planLog[1]!.diff).toEqual({ name: { from: "Cycle", to: "Cycle 1" } });
+    expect(planLog.at(-1)!.diff.testsAdded).toEqual({ from: null, to: "A" });
+  });
+
+  it("validates tests, dates and access", async () => {
+    const a = await mkTest("A");
+    const other = (await ctx.agent.post("/api/projects").send({ name: "P2" })).body;
+    const foreign = (await ctx.agent.post(`/api/projects/${other.id}/tests`).send({ title: "F" })).body;
+    await ctx.agent.post(`/api/projects/${ctx.projectId}/plans`).send({ name: "X", testCaseIds: [foreign.id] }).expect(400);
+    await ctx.agent.post(`/api/projects/${ctx.projectId}/plans`).send({ name: "X", dueDate: "soon" }).expect(400);
+    await ctx.agent.post(`/api/projects/${ctx.projectId}/plans`).send({ name: " " }).expect(400);
+    const p = await mkPlan({ name: "P", testCaseIds: [a.id] });
+    const foreignPlan = (await ctx.agent.post(`/api/projects/${other.id}/plans`).send({ name: "FP" }).expect(201)).body;
+    await run(a.id, "passed", foreignPlan.id).expect(400);
+    await ctx.agent.post(`/api/plans/${p.id}/tests`).send({ testCaseIds: [] }).expect(400);
+
+    const viewer = await signUp(ctx.db, "Vic", "vic@x.com");
+    await ctx.agent.post(`/api/projects/${ctx.projectId}/members`).send({ email: "vic@x.com", role: "viewer" }).expect(201);
+    await viewer.get(`/api/plans/${p.id}`).expect(200);
+    await viewer.get(`/api/projects/${ctx.projectId}/plans`).expect(200);
+    await viewer.post(`/api/projects/${ctx.projectId}/plans`).send({ name: "N" }).expect(403);
+    await viewer.patch(`/api/plans/${p.id}`).send({ closed: true }).expect(403);
+    await viewer.post(`/api/plans/${p.id}/tests`).send({ testCaseIds: [a.id] }).expect(403);
+    await viewer.delete(`/api/plans/${p.id}`).expect(403);
+    const outsider = await signUp(ctx.db, "Out", "out@x.com");
+    await outsider.get(`/api/plans/${p.id}`).expect(404);
+  });
+
+  it("deleting a plan keeps its runs in the tests' history; deleting a test leaves the plan", async () => {
+    const a = await mkTest("A");
+    const b = await mkTest("B");
+    const p = await mkPlan({ name: "P", testCaseIds: [a.id, b.id] });
+    await run(a.id, "passed", p.id).expect(201);
+    await ctx.agent.delete(`/api/tests/${b.id}`).expect(204);
+    expect((await plan(p.id)).items).toHaveLength(1);
+    await ctx.agent.delete(`/api/plans/${p.id}`).expect(204);
+    await ctx.agent.get(`/api/plans/${p.id}`).expect(404);
+    const runs = (await ctx.agent.get(`/api/tests/${a.id}/runs`)).body;
+    expect(runs[0]).toMatchObject({ status: "passed", planId: null, planName: null });
+    expect((await ctx.agent.get(`/api/tests/${a.id}`)).body.status).toBe("passed");
+  });
+});

@@ -37,6 +37,7 @@ export function TopBar({ projectId }: { projectId?: string }) {
           <NavLink to={`/projects/${projectId}/overview`}>Overview</NavLink>
           <NavLink to={`/projects/${projectId}/tasks`}>Tasks</NavLink>
           <NavLink to={`/projects/${projectId}/tests`}>Test cases</NavLink>
+          <NavLink to={`/projects/${projectId}/plans`}>Test plans</NavLink>
           <NavLink to={`/projects/${projectId}/labels`}>Labels</NavLink>
           <NavLink to={`/projects/${projectId}/members`}>Members</NavLink>
         </nav>

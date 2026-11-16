@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { TEST_STATUSES, TEST_STATUS_LABELS, type TestCase, type TestStatus } from "@rpit/shared";
-import { useDeleteTestRun, useRecordTestRun, useTestRuns } from "../api/hooks.ts";
+import { useDeleteTestRun, usePlan, useRecordTestRun, useTestRuns } from "../api/hooks.ts";
 import { formatDateTime } from "../lib/format.ts";
 import { MarkdownEditor, MarkdownView } from "./markdown.tsx";
 import { TestStatusPill } from "./ui.tsx";
@@ -17,12 +18,16 @@ export function TestRuns({ projectId, test, canEdit }: { projectId: string; test
   const [status, setStatus] = useState<TestStatus>("passed");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Opened from a test plan (?plan=<id>): runs go into that plan while it's open and contains this test.
+  const [sp] = useSearchParams();
+  const plan = usePlan(projectId, sp.get("plan")).data;
+  const inPlan = plan && !plan.closedAt && plan.items.some((i) => i.testCaseId === test.id) ? plan : undefined;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     try {
-      await record.mutateAsync({ status, notes });
+      await record.mutateAsync({ status, notes, planId: inPlan?.id });
       setNotes("");
     } catch (err) {
       setError((err as Error).message);
@@ -60,10 +65,11 @@ export function TestRuns({ projectId, test, canEdit }: { projectId: string; test
             placeholder="Environment, build, what you saw…"
           />
           {error && <div className="form-error">{error}</div>}
-          <div>
+          <div className="run-submit">
             <button className="btn primary" disabled={record.isPending}>
               {record.isPending ? "Recording…" : `Record ${TEST_STATUS_LABELS[status].toLowerCase()} run`}
             </button>
+            {inPlan && <span className="muted"> in test plan <b>{inPlan.name}</b></span>}
           </div>
         </form>
       )}
@@ -78,6 +84,7 @@ export function TestRuns({ projectId, test, canEdit }: { projectId: string; test
               <div className="line">
                 <span>
                   <TestStatusPill status={r.status} /> {r.runByName ?? (r.runById ? "Someone" : "Earlier result")}
+                  {r.planName && <span className="plan-chip">{r.planName}</span>}
                   {i === 0 && <span className="muted"> · latest</span>}
                 </span>
                 <span className="run-meta">

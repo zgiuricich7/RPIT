@@ -1,4 +1,4 @@
-import { TEST_STATUSES, type TestCase, type TestStatus, type TestSuite } from "./schemas.ts";
+import { TEST_STATUSES, type TestCase, type TestProgress, type TestStatus, type TestSuite } from "./schemas.ts";
 
 /**
  * Test suites are folders for test cases and can be nested. These pure helpers
@@ -63,12 +63,8 @@ export function suitePath(suites: SuiteLike[], id: string | null): string {
   return names.join(" / ");
 }
 
-export interface SuiteStats {
-  total: number;
-  byStatus: Record<TestStatus, number>;
-  /** Passed / executed (excluding not run), as a whole percentage; null when nothing has run. */
-  passRate: number | null;
-}
+/** Passed / executed (excluding not run) is `passRate`, a whole percentage; null when nothing has run. */
+export type SuiteStats = TestProgress;
 
 /** Counts and pass rate for a set of tests (same definition as the project summary). */
 export function testStats(tests: Pick<TestCase, "status">[]): SuiteStats {

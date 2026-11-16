@@ -16,11 +16,12 @@ import {
   type Task,
   type TaskStatus,
   type TestCase,
+  type TestPlan,
   type TestStatus,
   type TestSuite,
   type User,
 } from "@rpit/shared";
-import { useSuites, useTasks, useTests, useUsers } from "../api/hooks.ts";
+import { usePlans, useSuites, useTasks, useTests, useUsers } from "../api/hooks.ts";
 import { formatDate, formatDateTime } from "../lib/format.ts";
 import { useDialogs } from "./dialogs.tsx";
 
@@ -58,6 +59,7 @@ interface Lookup {
   tasks: Task[];
   tests: TestCase[];
   suites: TestSuite[];
+  plans: TestPlan[];
 }
 
 function formatValue(a: Activity, field: string, v: FieldChange["from"], l: Lookup): string {
@@ -202,11 +204,24 @@ function Sentence({ a, scope, lookup }: { a: Activity; scope: ActivityScope; loo
         return scope === "test" ? <>deleted a {result?.toLowerCase()} run</> : <>deleted a {result?.toLowerCase()} run of {testName}</>;
       }
       const what = a.diff.status?.to === "not_run" ? <>marked</> : <>ran</>;
+      const planId = a.diff.planId?.to;
+      const planName = planId ? (lookup.plans.find((p) => p.id === planId)?.name ?? "a deleted test plan") : null;
+      const where = planName ? <> in <b>{planName}</b></> : null;
       return scope === "test" ? (
-        <>{what} it: <b>{result}</b></>
+        <>{what} it{where}: <b>{result}</b></>
       ) : (
-        <>{what} test case {testName}: <b>{result}</b></>
+        <>{what} test case {testName}{where}: <b>{result}</b></>
       );
+    }
+    case "test_plan": {
+      const plan = <b>{a.label}</b>;
+      const keys = Object.keys(a.diff);
+      if (a.action === "updated" && a.diff.testsAdded) return <>added {String(a.diff.testsAdded.to)} to test plan {plan}</>;
+      if (a.action === "updated" && a.diff.testsRemoved) return <>removed {String(a.diff.testsRemoved.from)} from test plan {plan}</>;
+      if (a.action === "updated" && keys.length === 1 && a.diff.closedAt) {
+        return <>{a.diff.closedAt.to ? "closed" : "reopened"} test plan {plan}</>;
+      }
+      return <>{verb} test plan {plan}</>;
     }
     case "test_suite":
       return <>{verb} test suite <b>{a.label}</b></>;
@@ -234,6 +249,7 @@ export function ActivityFeed(props: {
     tasks: useTasks(props.projectId).data ?? [],
     tests: useTests(props.projectId).data ?? [],
     suites: useSuites(props.projectId).data ?? [],
+    plans: usePlans(props.projectId).data ?? [],
   };
   const items = query.data?.pages.flatMap((p) => p.items) ?? [];
 
