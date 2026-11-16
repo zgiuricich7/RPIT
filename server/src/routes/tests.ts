@@ -10,6 +10,7 @@ import { notifyAssignment } from "../notify.ts";
 import { changes, logActivity, snapshot, TEST_FIELDS } from "../activity.ts";
 import { activityPage } from "./activity.ts";
 import { checkAssignee } from "./tasks.ts";
+import { attachmentIds, removeFilesAfterCommit } from "../uploads.ts";
 
 const testEntry = (t: TestCase) => ({
   projectId: t.projectId,
@@ -79,7 +80,17 @@ export function testCaseRoutes(db: DB) {
   });
 
   byId.get("/:testId/activity", can("viewer", byTestCase), (req, res) => {
-    res.json(activityPage(db, req, "a.entity = 'test_case' AND a.entity_id = ?", [param(req, "testId")]));
+    // Its own changes plus files attached to it (attachment entries record the test case id in their diff).
+    const id = param(req, "testId");
+    res.json(
+      activityPage(
+        db,
+        req,
+        `(a.entity = 'test_case' AND a.entity_id = ?)
+         OR (a.entity = 'attachment' AND ? IN (json_extract(a.diff, '$.testCaseId.to'), json_extract(a.diff, '$.testCaseId.from')))`,
+        [id, id],
+      ),
+    );
   });
 
   byId.patch("/:testId", can("editor", byTestCase), (req, res) => {
@@ -108,7 +119,8 @@ export function testCaseRoutes(db: DB) {
     const actorId = currentUser(req).id;
     transaction(db, () => {
       logActivity(db, { ...testEntry(t), actorId, action: "deleted", diff: snapshot(t, TEST_FIELDS, "deleted") });
-      db.prepare(`DELETE FROM test_cases WHERE id = ?`).run(t.id);
+      removeFilesAfterCommit(db, attachmentIds(db, "test_case_id = ?", [t.id]));
+      db.prepare(`DELETE FROM test_cases WHERE id = ?`).run(t.id); // cascades to its attachments
     });
     res.status(204).end();
   });

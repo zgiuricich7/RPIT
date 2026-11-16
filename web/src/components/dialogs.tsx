@@ -39,6 +39,7 @@ import {
 } from "../api/hooks.ts";
 import { formatDateTime } from "../lib/format.ts";
 import { ActivityFeed } from "./activity.tsx";
+import { Attachments } from "./attachments.tsx";
 import { LabelPicker } from "./labels.tsx";
 import { CommentBody, MarkdownEditor } from "./markdown.tsx";
 import { Modal, Options } from "./ui.tsx";
@@ -294,6 +295,11 @@ function TaskDialog(props: {
           )}
         </div>
       </form>
+      {task && (
+        <div className="modal-body">
+          <Attachments projectId={projectId} taskId={task.id} canEdit={canEdit} />
+        </div>
+      )}
       {task && (
         <div className="modal-body">
           <Discussion projectId={projectId} taskId={task.id} />
@@ -627,6 +633,11 @@ function TestDialog(props: { projectId: string; test: TestCase | null; tasks: Ta
           )}
         </div>
       </form>
+      {test && (
+        <div className="modal-body">
+          <Attachments projectId={projectId} testCaseId={test.id} canEdit={canEdit} />
+        </div>
+      )}
       {test && (
         <div className="modal-body">
           <History>{() => <TestHistory projectId={projectId} testId={test.id} />}</History>

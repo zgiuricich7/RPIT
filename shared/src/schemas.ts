@@ -185,6 +185,29 @@ export const LabelPatch = z.object({ name: labelName, color: LabelColor }).parti
 export type LabelInput = z.input<typeof LabelInput>;
 export type LabelPatch = z.infer<typeof LabelPatch>;
 
+// ---------- Attachments ----------
+/** Largest file the server accepts. */
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+/**
+ * Types shown in the browser (thumbnails, opening in a tab). Every other file,
+ * including HTML, SVG and PDF, is served as a download so it can't run in the app's origin.
+ */
+export const INLINE_ATTACHMENT_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
+/**
+ * Query string of `POST /api/projects/:projectId/attachments`; the request body is
+ * the raw file (Content-Type: application/octet-stream). Give a task or a test
+ * case to attach to it, or neither for a project file.
+ */
+export const AttachmentUpload = z
+  .object({
+    name: z.string().trim().min(1, "File name is required").max(255),
+    type: z.string().max(200).optional(),
+    taskId: id.optional(),
+    testCaseId: id.optional(),
+  })
+  .refine((q) => !(q.taskId && q.testCaseId), { message: "Attach to a task or a test case, not both", path: ["taskId"] });
+export type AttachmentUpload = z.infer<typeof AttachmentUpload>;
+
 // ---------- Comments ----------
 export const CommentInput = z.object({
   body: z.string().trim().min(1, "Comment can't be empty").max(10_000),
@@ -217,7 +240,7 @@ export const NotificationPatch = z.object({ read: z.boolean() });
 export type NotificationPatch = z.infer<typeof NotificationPatch>;
 
 // ---------- Activity log ----------
-export const ACTIVITY_ENTITIES = ["project", "member", "task", "comment", "test_case", "label"] as const;
+export const ACTIVITY_ENTITIES = ["project", "member", "task", "comment", "test_case", "label", "attachment"] as const;
 export const ACTIVITY_ACTIONS = ["created", "updated", "deleted"] as const;
 export const ActivityEntity = z.enum(ACTIVITY_ENTITIES);
 export const ActivityAction = z.enum(ACTIVITY_ACTIONS);
@@ -306,6 +329,22 @@ export interface Label {
   projectId: string;
   name: string;
   color: LabelColor;
+  createdAt: string;
+}
+
+/** A file on a project, task or test case (at most one of taskId / testCaseId is set). */
+export interface Attachment {
+  id: string;
+  projectId: string;
+  taskId: string | null;
+  testCaseId: string | null;
+  /** Null if the uploader's account was deleted. */
+  uploaderId: string | null;
+  uploaderName: string | null;
+  filename: string;
+  contentType: string;
+  /** Bytes. */
+  size: number;
   createdAt: string;
 }
 

@@ -1,5 +1,6 @@
 import type {
   Activity,
+  Attachment,
   Comment,
   CommentMention,
   Label,
@@ -75,6 +76,23 @@ export const toLabel = (r: Row): Label => ({
   color: r.color as Label["color"],
   createdAt: r.created_at as string,
 });
+
+export const toAttachment = (r: Row): Attachment => ({
+  id: r.id as string,
+  projectId: r.project_id as string,
+  taskId: (r.task_id as string | null) ?? null,
+  testCaseId: (r.test_case_id as string | null) ?? null,
+  uploaderId: (r.uploader_id as string | null) ?? null,
+  uploaderName: (r.uploader_name as string | null) ?? null,
+  filename: r.filename as string,
+  contentType: r.content_type as string,
+  size: Number(r.size),
+  createdAt: r.created_at as string,
+});
+
+/** Attachments with the uploader's name; alias attachments as f. */
+export const ATTACHMENT_SELECT = `
+  SELECT f.*, u.name AS uploader_name FROM attachments f LEFT JOIN users u ON u.id = f.uploader_id`;
 
 export const toComment = (r: Row): Comment => ({
   id: r.id as string,

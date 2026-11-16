@@ -2,15 +2,19 @@ import { createApp } from "./app.ts";
 import { config } from "./config.ts";
 import { openDatabase } from "./db/index.ts";
 import { startReminderScheduler } from "./reminders.ts";
+import { sweepOrphanUploads } from "./uploads.ts";
 
 const db = openDatabase(config.databasePath);
 const app = createApp(db, { staticDir: config.isProduction ? config.webDist : undefined });
 
 const stopReminders = startReminderScheduler(db);
+const swept = sweepOrphanUploads(db);
+if (swept) console.log(`Removed ${swept} orphaned attachment file(s)`);
 
 const server = app.listen(config.port, () => {
   console.log(`RPIT API listening on http://localhost:${config.port}`);
   console.log(`Database: ${config.databasePath}`);
+  console.log(`Uploads: ${config.uploadsDir}`);
 });
 
 const shutdown = () => {

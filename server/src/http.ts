@@ -31,6 +31,13 @@ export function errorHandler(err: unknown, _req: Request, res: Response<ApiError
     res.status(err.status).json({ error: err.message, fieldErrors: err.fieldErrors });
     return;
   }
+  // From the body parsers: a JSON body over 1 MB, or a file over MAX_ATTACHMENT_BYTES.
+  if (err && typeof err === "object" && (err as { type?: string }).type === "entity.too.large") {
+    const limit = Number((err as { limit?: number }).limit);
+    const mb = Number.isFinite(limit) ? ` (the limit is ${Math.round(limit / (1024 * 1024))} MB)` : "";
+    res.status(413).json({ error: `That's too large${mb}` });
+    return;
+  }
   if (err instanceof SyntaxError && "body" in err) {
     res.status(400).json({ error: "Malformed JSON body" });
     return;

@@ -10,6 +10,8 @@ and test case tracking — with a per-project overview dashboard.
 - **Unlimited subtask nesting** with progress roll-ups (measured on tasks that have no subtasks)
 - **List view** (collapsible tree) and **Board view** (drag cards between status columns)
 - **Labels** per project (name and colour) to tag tasks; filter the list and board by label
+- **Attachments** on projects, tasks and test cases (up to 25 MB each): drop files in or pick them, with image
+  thumbnails; stored on the server's disk next to the database (`UPLOADS_DIR` to change it)
 - **Comments** on every task, with authors and timestamps, **@-mentions** of project members, and editing
 - **Markdown** in comments and every description/notes field, with a formatting toolbar and preview
 - **Inbox** of in-app notifications when you're assigned a task or test, mentioned, or someone

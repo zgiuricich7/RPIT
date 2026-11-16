@@ -23,6 +23,7 @@ import {
 } from "../api/hooks.ts";
 import { ProjectDialog, useDialogs } from "../components/dialogs.tsx";
 import { ActivityFeed } from "../components/activity.tsx";
+import { Attachments } from "../components/attachments.tsx";
 import { CommentBody, MarkdownView } from "../components/markdown.tsx";
 import { DueDate, Meter, Stack, TaskStatusPill, TestStatusPill, useToday } from "../components/ui.tsx";
 import { formatDateTime } from "../lib/format.ts";
@@ -201,6 +202,10 @@ export function OverviewPage() {
             ))}
           </div>
         </div>
+      </div>
+
+      <div className="panel">
+        <Attachments projectId={project.id} canEdit={project.role !== "viewer"} heading="Project files" />
       </div>
 
       <div className="panel">

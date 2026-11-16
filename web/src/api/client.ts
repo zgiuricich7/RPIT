@@ -17,6 +17,31 @@ export class ApiRequestError extends Error {
  */
 export const CLIENT_ID = crypto.randomUUID();
 
+async function parse<T>(res: Response): Promise<T> {
+  if (res.status === 204) return undefined as T;
+  const data = (await res.json().catch(() => ({}))) as T | ApiError;
+  if (!res.ok) {
+    const err = data as ApiError;
+    throw new ApiRequestError(res.status, err.error ?? `Request failed (${res.status})`, err.fieldErrors);
+  }
+  return data as T;
+}
+
+/**
+ * Upload one file as the raw request body; details go in the query string
+ * (see AttachmentUpload). Sent as octet-stream so the server never parses it.
+ */
+export async function uploadFile<T>(path: string, file: Blob, query: Record<string, string | undefined>): Promise<T> {
+  const qs = new URLSearchParams(Object.entries(query).filter((e): e is [string, string] => e[1] !== undefined));
+  const res = await fetch(`/api${path}?${qs}`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "X-RPIT-Client": CLIENT_ID, "Content-Type": "application/octet-stream" },
+    body: file,
+  });
+  return parse<T>(res);
+}
+
 /** Thin fetch wrapper: JSON in/out, cookies included, errors thrown as ApiRequestError. */
 export async function api<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -28,11 +53,5 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
     },
     body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
   });
-  if (res.status === 204) return undefined as T;
-  const data = (await res.json().catch(() => ({}))) as T | ApiError;
-  if (!res.ok) {
-    const err = data as ApiError;
-    throw new ApiRequestError(res.status, err.error ?? `Request failed (${res.status})`, err.fieldErrors);
-  }
-  return data as T;
+  return parse<T>(res);
 }

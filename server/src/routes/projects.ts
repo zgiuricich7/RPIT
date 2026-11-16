@@ -8,6 +8,7 @@ import { currentUser } from "../auth.ts";
 import { requireProjectRole } from "../access.ts";
 import { changes, logActivity, PROJECT_FIELDS, snapshot } from "../activity.ts";
 import { syncProjectSubtasksDone } from "../rollup.ts";
+import { attachmentIds, removeFilesAfterCommit } from "../uploads.ts";
 
 export function projectRoutes(db: DB) {
   const r = Router();
@@ -97,6 +98,7 @@ export function projectRoutes(db: DB) {
     const cur = get(id, userId);
     transaction(db, () => {
       logActivity(db, { ...projectEntry(id, userId, cur.name), action: "deleted", diff: snapshot(cur, PROJECT_FIELDS, "deleted") });
+      removeFilesAfterCommit(db, attachmentIds(db, "project_id = ?", [id]));
       db.prepare(`DELETE FROM projects WHERE id = ?`).run(id);
     });
     res.status(204).end();

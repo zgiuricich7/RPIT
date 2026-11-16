@@ -149,6 +149,22 @@ main.page { padding: 20px; max-width: 1400px; margin: 0 auto; }
   border: 1px solid color-mix(in srgb, var(--done) 45%, transparent); border-radius: var(--radius);
   background: color-mix(in srgb, var(--done) 8%, transparent);
 }
+/* ---------- Attachments ---------- */
+.attachments { display: grid; gap: 8px; border-radius: var(--radius); }
+.attachments.over { outline: 2px dashed var(--acc); outline-offset: 6px; }
+.attachments-head { display: flex; align-items: center; gap: 10px; }
+.attachments-head h3 { font-size: 14px; flex: 1; }
+.file-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.file-list li { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.file-list .thumb {
+  flex: none; width: 40px; height: 40px; border-radius: 6px; border: 1px solid var(--line);
+  overflow: hidden; display: grid; place-items: center; background: var(--bg);
+}
+.file-list .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.file-list .file-icon { font-size: 10px; font-weight: 600; color: var(--mute); }
+.file-list .file-main { flex: 1; min-width: 0; }
+.file-list .file-main a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-list .meta { font-size: 12px; }
 .label-preview { align-self: center; padding-bottom: 6px; }
 .labels-table { min-width: 560px; }
 .labels-table input { max-width: 260px; }

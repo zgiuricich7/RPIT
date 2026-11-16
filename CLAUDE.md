@@ -40,6 +40,8 @@ server/   Express 5 API on Node's built-in SQLite (node:sqlite, no native deps)
   src/notify.ts       creates notifications (assignments, mentions, replies) and stores comment mentions
   src/reminders.ts    sendTaskReminders(db, today) + the 15-minute scheduler started in index.ts
   src/rollup.ts       syncSubtasksDone: "all subtasks are done" prompts to a parent task's assignee
+  src/uploads.ts      attachment files on disk (named by id), removeFilesAfterCommit, startup orphan sweep
+  src/routes/attachments.ts  upload (raw body), list, download (safe headers), delete
   src/activity.ts     logActivity + changes/snapshot diff helpers and the tracked fields per entity
   src/events.ts       in-process EventHub: logActivity publishes a ProjectEvent after commit
   src/routes/events.ts  GET /api/projects/:id/events — server-sent event stream per project
@@ -54,6 +56,7 @@ web/      React 19 + Vite + TanStack Query + React Router 7
   src/components/mentions.tsx  @-mention autocomplete textarea (used by MarkdownEditor)
   src/components/TopBar.tsx    header with project switcher and inbox badge
   src/components/activity.tsx  ActivityFeed: renders log entries as sentences + field changes
+  src/components/attachments.tsx  Attachments: file list + upload/drop for a task, test case or the project
   src/components/labels.tsx    LabelPicker (toggle chips + create) for the task dialog; LabelChip/TaskLabels are in ui.tsx
   src/pages/          Overview, Tasks (List + Board; filters and sort in the URL), Tests, Labels, Members, Inbox, Auth
   src/components/TaskFilters.tsx  search box ("/" focuses it) + assignee/priority/status/label/due filter menus
@@ -78,6 +81,9 @@ docs/ROADMAP.md       prioritised backlog
   `task_labels(task_id, label_id)` links them; both FKs cascade. Tasks expose `labelIds` (in label name order);
   `TaskInput` / `TaskPatch` take `labelIds`, which replaces the set. Labels must be in the task's project.
   Editors create, rename and delete labels.
+- `attachments(project_id, task_id, test_case_id, uploader_id, filename, content_type, size)` — files on a project
+  (both ids null), a task or a test case (CHECK: not both). Cascades from all three; `uploader_id` SET NULL. The
+  bytes live in the uploads folder (`UPLOADS_DIR`, default `uploads/` next to the database), named by attachment id.
 - `comments.task_id → tasks.id` (cascade), `comments.author_id → users.id`; `edited_at` is set when the author edits
 - `test_cases.task_id → tasks.id` (`ON DELETE SET NULL`) — deleting a task unlinks tests, never deletes them.
 - `assignee_id` columns reference `users` with `SET NULL`.
@@ -134,6 +140,15 @@ docs/ROADMAP.md       prioritised backlog
   `markdownToPlainText` for one-line previews. Stored text is the raw Markdown; the server doesn't parse it.
 - UI copy: sentence case, plain verbs, buttons say what they do ("Save task", "Post comment").
 - Every route except `/api/health` and `/api/auth/*` requires a session (`requireUser`).
+- **Attachments** are uploaded as the raw body (`application/octet-stream`, max `MAX_ATTACHMENT_BYTES` = 25 MB) to
+  `POST /api/projects/:id/attachments?name=&type=&taskId=|testCaseId=`; editors upload and delete, any member
+  downloads. The server never trusts the name or type: files are stored by id, names are stripped of folders and
+  control characters, and downloads are `application/octet-stream` + `attachment` unless the type is in
+  `INLINE_ATTACHMENT_TYPES` (PNG/JPEG/GIF/WebP), always with `nosniff` and a sandboxing CSP. Never serve an upload
+  inline outside that list (HTML/SVG would run in our origin). Anything that deletes rows that own attachments
+  (task subtree, test case, project) must call `removeFilesAfterCommit(db, attachmentIds(...))` before the delete;
+  cascaded attachments aren't logged one by one (like comments). Uploads and deletes are audited as entity
+  `attachment` (with `taskId`, and `testCaseId` in the diff so a test case's history includes its files).
 - **Every project-scoped route checks the caller's role** with `requireProjectRole` (`server/src/access.ts`):
   `const can = requireProjectRole(db); r.patch("/:taskId", can("editor", byTask), handler)`. Resolvers
   (`byProject`, `byTask`, `byTestCase`, `byComment`) map a route param to its project. Non-members get 404,
@@ -189,3 +204,5 @@ docs/ROADMAP.md       prioritised backlog
   Rows for deleted projects are kept but no API exposes them.
 - Keyboard drag and drop reorders but can't nest or un-nest in the list (use the task dialog's parent picker).
 - SQLite single file; fine for a team on one server. Postgres is on the roadmap.
+- Attachments are on the local disk next to the database (back up both); no object storage, previews beyond
+  images, or virus scanning. Uploads are buffered in memory (25 MB max). Markdown images still render as links.

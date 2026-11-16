@@ -21,6 +21,7 @@ import { publishEvent } from "../events.ts";
 import { activityPage } from "./activity.ts";
 import { checkLabels, setTaskLabels } from "./labels.ts";
 import { syncSubtasksDone } from "../rollup.ts";
+import { attachmentIds, removeFilesAfterCommit } from "../uploads.ts";
 
 /** Assignees must be members of the project. */
 export function checkAssignee(db: DB, projectId: string, assigneeId: string | null | undefined) {
@@ -276,7 +277,9 @@ export function taskRoutes(db: DB) {
           diff: { taskId: { from: tc.taskId, to: null } },
         });
       }
-      db.prepare(`DELETE FROM tasks WHERE id = ?`).run(id); // cascades to subtasks + comments, unlinks tests
+      // Attachments on the subtree go by cascade (not logged one by one, like comments); remove their files.
+      removeFilesAfterCommit(db, attachmentIds(db, `task_id IN (${ids.map(() => "?").join(",")})`, ids));
+      db.prepare(`DELETE FROM tasks WHERE id = ?`).run(id); // cascades to subtasks, comments, attachments; unlinks tests
       // Deleting an open subtask can leave the parent's remaining subtasks all done.
       syncSubtasksDone(db, [root.parentId], actorId);
     });

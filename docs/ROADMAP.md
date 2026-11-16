@@ -50,7 +50,13 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
     and skip unassigned parents. Per-project setting (on by default) in Edit project.
     Follow-up: an opt-in fully automatic mode, reopening a done parent when a subtask is reopened, and notifying
     owners for unassigned parents.
-2.6 **Attachments** on tasks and test cases.
+2.6 ~~**Attachments** on projects, tasks, and test cases.~~ Done: upload by button or drag and drop (25 MB each)
+    in the task and test dialogs and "Project files" on the overview; image thumbnails; editors upload and delete,
+    every member downloads. Files live on disk next to the database (`UPLOADS_DIR`), named by id; only PNG/JPEG/
+    GIF/WebP are shown inline, everything else downloads with nosniff and a sandboxing CSP. Audited, live-updated,
+    removed with their task, test case or project, and orphaned files are swept on startup.
+    Follow-up: images in Markdown (upload and embed in comments/descriptions), PDF previews, attachments on
+    comments, object storage (S3) for multi-server setups, per-project storage quotas, and virus scanning.
 2.7 **Configurable board columns** per project (custom statuses).
 
 ## 3. Testing

@@ -3,6 +3,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { hasRole, positionBetween, type ProjectRole } from "@rpit/shared";
 import type {
   ActivityPage,
+  Attachment,
   Comment,
   Label,
   LabelInput,
@@ -28,7 +29,7 @@ import type {
   TestCasePatch,
   User,
 } from "@rpit/shared";
-import { api, ApiRequestError, CLIENT_ID } from "./client.ts";
+import { api, ApiRequestError, CLIENT_ID, uploadFile } from "./client.ts";
 
 /**
  * Query keys. Every mutation invalidates the project-scoped keys it can
@@ -45,6 +46,7 @@ export const keys = {
   recent: (projectId: string) => ["project", projectId, "recent-comments"] as const,
   members: (projectId: string) => ["project", projectId, "members"] as const,
   labels: (projectId: string) => ["project", projectId, "labels"] as const,
+  attachments: (projectId: string) => ["project", projectId, "attachments"] as const,
   /** Under the project prefix, so every project mutation refreshes the logs too. */
   activity: (projectId: string, scope?: { task?: string; test?: string }) =>
     ["project", projectId, "activity", scope ?? {}] as const,
@@ -314,6 +316,46 @@ export function useDeleteLabel(projectId: string) {
     onSuccess: () => invalidateProject(qc, projectId),
   });
 }
+
+// ---------- Attachments ----------
+/** Every attachment in the project; components pick the project's, a task's or a test case's. */
+export function useAttachments(projectId: string) {
+  return useQuery({
+    queryKey: keys.attachments(projectId),
+    queryFn: () => api<Attachment[]>(`/projects/${projectId}/attachments`),
+  });
+}
+
+/** Where a file goes: a task, a test case, or neither for the project itself. */
+export interface AttachmentTarget {
+  taskId?: string;
+  testCaseId?: string;
+}
+
+export function useUploadAttachment(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ file, ...target }: AttachmentTarget & { file: File }) =>
+      uploadFile<Attachment>(`/projects/${projectId}/attachments`, file, {
+        name: file.name,
+        type: file.type || undefined,
+        ...target,
+      }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+export function useDeleteAttachment(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<void>(`/attachments/${id}`, { method: "DELETE" }),
+    onSuccess: () => invalidateProject(qc, projectId),
+  });
+}
+
+/** URL of a file: shown in the browser for safe image types, otherwise (or with `download`) saved. */
+export const attachmentUrl = (id: string, download = false) =>
+  `/api/attachments/${id}/download${download ? "?download" : ""}`;
 
 // ---------- Comments ----------
 export function useComments(taskId: string) {

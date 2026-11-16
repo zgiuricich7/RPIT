@@ -45,6 +45,11 @@ export const byLabel: ProjectResolver = {
   what: "Label",
   sql: `SELECT project_id FROM labels WHERE id = ?`,
 };
+export const byAttachment: ProjectResolver = {
+  param: "attachmentId",
+  what: "Attachment",
+  sql: `SELECT project_id FROM attachments WHERE id = ?`,
+};
 export const byComment: ProjectResolver = {
   param: "commentId",
   what: "Comment",

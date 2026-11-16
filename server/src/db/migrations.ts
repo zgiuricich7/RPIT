@@ -265,4 +265,55 @@ export const migrations: string[] = [
   CREATE INDEX idx_notifications_user ON notifications(user_id, created_at);
   CREATE INDEX idx_notifications_task ON notifications(task_id, kind);
   `,
+
+  /* 9: attachments on projects, tasks and test cases */ `
+  -- File contents live on disk (the uploads folder), named by id; this is the metadata.
+  -- task_id and test_case_id are both null for a project file. Deleting the project, task or
+  -- test case deletes its attachment rows; the server removes the files after the commit.
+  CREATE TABLE attachments (
+    id           TEXT PRIMARY KEY,
+    project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    task_id      TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+    test_case_id TEXT REFERENCES test_cases(id) ON DELETE CASCADE,
+    uploader_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+    filename     TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size         INTEGER NOT NULL CHECK (size >= 0),
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    CHECK (task_id IS NULL OR test_case_id IS NULL)
+  );
+  CREATE INDEX idx_attachments_project ON attachments(project_id);
+  CREATE INDEX idx_attachments_task ON attachments(task_id);
+  CREATE INDEX idx_attachments_test ON attachments(test_case_id);
+
+  -- Recreate activity to widen the entity CHECK with 'attachment' (same steps as migration 7).
+  DROP TRIGGER activity_no_update;
+  DROP TRIGGER activity_no_delete;
+  CREATE TABLE activity_new (
+    id         TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    actor_id   TEXT REFERENCES users(id) ON DELETE SET NULL,
+    entity     TEXT NOT NULL
+               CHECK (entity IN ('project','member','task','comment','test_case','label','attachment')),
+    entity_id  TEXT NOT NULL,
+    task_id    TEXT,
+    action     TEXT NOT NULL CHECK (action IN ('created','updated','deleted')),
+    label      TEXT NOT NULL DEFAULT '',
+    diff       TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  INSERT INTO activity_new (rowid, id, project_id, actor_id, entity, entity_id, task_id, action, label, diff, created_at)
+    SELECT rowid, id, project_id, actor_id, entity, entity_id, task_id, action, label, diff, created_at FROM activity;
+  DROP TABLE activity;
+  ALTER TABLE activity_new RENAME TO activity;
+  CREATE INDEX idx_activity_project ON activity(project_id);
+  CREATE INDEX idx_activity_task ON activity(task_id);
+  CREATE INDEX idx_activity_entity ON activity(entity, entity_id);
+  CREATE TRIGGER activity_no_update
+  BEFORE UPDATE OF id, project_id, entity, entity_id, task_id, action, label, diff, created_at ON activity
+  BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
+  CREATE TRIGGER activity_no_delete
+  BEFORE DELETE ON activity
+  BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
+  `,
 ];

@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.ts";
 import { openDatabase } from "../src/db/index.ts";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { MAX_ATTACHMENT_BYTES } from "@rpit/shared";
 import { sendTaskReminders } from "../src/reminders.ts";
+import { sweepOrphanUploads } from "../src/uploads.ts";
 
 /** Fresh in-memory DB + signed-in agent for each test. */
 async function setup() {
@@ -1019,5 +1024,175 @@ describe("subtasks done prompts (status roll-up)", () => {
 
     const off = (await agent.post("/api/projects").send({ name: "Quiet", notifySubtasksDone: false }).expect(201)).body;
     expect(off.notifySubtasksDone).toBe(false);
+  });
+});
+
+describe("attachments", () => {
+  /** Like setup(), with a temporary uploads folder. */
+  async function setupWithUploads() {
+    const db = openDatabase(":memory:");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rpit-uploads-"));
+    const app = createApp(db, { uploadsDir: dir });
+    const agent = request.agent(app);
+    await agent.post("/api/auth/register").send({ name: "Tester", email: "t@example.com", password: "password123" }).expect(201);
+    const projectId = (await agent.post("/api/projects").send({ name: "P1" })).body.id as string;
+    const join = async (name: string, email: string, role: string) => {
+      const a = request.agent(app);
+      await a.post("/api/auth/register").send({ name, email, password: "password123" }).expect(201);
+      await agent.post(`/api/projects/${projectId}/members`).send({ email, role }).expect(201);
+      return a;
+    };
+    const files = () => fs.readdirSync(dir);
+    return { db, dir, app, agent, projectId, join, files };
+  }
+  type Ctx = Awaited<ReturnType<typeof setupWithUploads>>;
+  type Agent = Ctx["agent"];
+  const upload = (c: Ctx, query: Record<string, string>, data: Buffer | string, a: Agent = c.agent) =>
+    a
+      .post(`/api/projects/${c.projectId}/attachments`)
+      .query(query)
+      .set("Content-Type", "application/octet-stream")
+      .send(Buffer.isBuffer(data) ? data : Buffer.from(data));
+  /** Download the raw bytes (supertest would otherwise only buffer text types). */
+  const download = (c: Ctx, id: string) =>
+    c.agent
+      .get(`/api/attachments/${id}/download`)
+      .buffer(true)
+      .parse((r, cb) => {
+        const chunks: Buffer[] = [];
+        r.on("data", (d: Buffer) => chunks.push(d));
+        r.on("end", () => cb(null, Buffer.concat(chunks)));
+      });
+
+  it("uploads project, task and test files, lists them and downloads the bytes", async () => {
+    const c = await setupWithUploads();
+    const task = (await c.agent.post(`/api/projects/${c.projectId}/tasks`).send({ title: "T" })).body;
+    const test = (await c.agent.post(`/api/projects/${c.projectId}/tests`).send({ title: "X" })).body;
+
+    const spec = (await upload(c, { name: "spec.txt", type: "text/plain" }, "hello").expect(201)).body;
+    expect(spec).toMatchObject({
+      filename: "spec.txt",
+      contentType: "text/plain",
+      size: 5,
+      taskId: null,
+      testCaseId: null,
+      uploaderName: "Tester",
+    });
+    const bytes = Buffer.from([137, 80, 78, 71, 0, 255]);
+    const shot = (await upload(c, { name: "shot.png", type: "image/png", taskId: task.id }, bytes).expect(201)).body;
+    expect(shot.taskId).toBe(task.id);
+    const log = (await upload(c, { name: "../../etc/run.log", type: "not a type", testCaseId: test.id }, "x").expect(201)).body;
+    expect(log).toMatchObject({ filename: "run.log", contentType: "application/octet-stream", testCaseId: test.id });
+
+    const list = (await c.agent.get(`/api/projects/${c.projectId}/attachments`).expect(200)).body;
+    expect(list.map((f: { filename: string }) => f.filename)).toEqual(["spec.txt", "shot.png", "run.log"]);
+    expect(c.files().sort()).toEqual([spec.id, shot.id, log.id].sort());
+
+    expect((await download(c, spec.id).expect(200)).body.toString()).toBe("hello");
+    expect(Buffer.compare((await download(c, shot.id).expect(200)).body, bytes)).toBe(0);
+  });
+
+  it("serves only safe images inline; everything else downloads as octet-stream with nosniff and a sandbox", async () => {
+    const c = await setupWithUploads();
+    const png = (await upload(c, { name: "a.png", type: "image/png" }, "png").expect(201)).body;
+    const html = (await upload(c, { name: 'évil "page".html', type: "text/html" }, "<script>alert(1)</script>").expect(201)).body;
+    const svg = (await upload(c, { name: "x.svg", type: "image/svg+xml" }, "<svg/>").expect(201)).body;
+
+    const img = await download(c, png.id).expect(200);
+    expect(img.headers["content-type"]).toBe("image/png");
+    expect(img.headers["content-disposition"]).toMatch(/^inline;/);
+    expect(img.headers["x-content-type-options"]).toBe("nosniff");
+    expect(img.headers["content-security-policy"]).toContain("sandbox");
+    const forced = await c.agent.get(`/api/attachments/${png.id}/download?download`).expect(200);
+    expect(forced.headers["content-disposition"]).toMatch(/^attachment;/);
+
+    for (const f of [html, svg]) {
+      const r = await download(c, f.id).expect(200);
+      expect(r.headers["content-type"]).toBe("application/octet-stream");
+      expect(r.headers["content-disposition"]).toMatch(/^attachment;/);
+    }
+    const r = await download(c, html.id);
+    expect(r.headers["content-disposition"]).toBe(
+      "attachment; filename=\"_vil _page_.html\"; filename*=UTF-8''%C3%A9vil%20%22page%22.html",
+    );
+  });
+
+  it("checks roles, targets and the body", async () => {
+    const c = await setupWithUploads();
+    const f = (await upload(c, { name: "a.txt" }, "a").expect(201)).body;
+    const viewer = await c.join("Vic", "vic@x.com", "viewer");
+    await viewer.get(`/api/projects/${c.projectId}/attachments`).expect(200);
+    await viewer.get(`/api/attachments/${f.id}/download`).expect(200);
+    await upload(c, { name: "b.txt" }, "b", viewer).expect(403);
+    await viewer.delete(`/api/attachments/${f.id}`).expect(403);
+
+    const outsider = request.agent(c.app);
+    await outsider.post("/api/auth/register").send({ name: "Out", email: "out@x.com", password: "password123" }).expect(201);
+    await outsider.get(`/api/attachments/${f.id}/download`).expect(404);
+    await outsider.get(`/api/projects/${c.projectId}/attachments`).expect(404);
+
+    const other = (await c.agent.post("/api/projects").send({ name: "P2" })).body;
+    const foreignTask = (await c.agent.post(`/api/projects/${other.id}/tasks`).send({ title: "F" })).body;
+    const task = (await c.agent.post(`/api/projects/${c.projectId}/tasks`).send({ title: "T" })).body;
+    const test = (await c.agent.post(`/api/projects/${c.projectId}/tests`).send({ title: "X" })).body;
+    await upload(c, { name: "x", taskId: foreignTask.id }, "x").expect(400);
+    await upload(c, { name: "x", taskId: task.id, testCaseId: test.id }, "x").expect(400);
+    await upload(c, {}, "x").expect(400);
+    await c.agent.post(`/api/projects/${c.projectId}/attachments`).query({ name: "x.json" }).send({ a: 1 }).expect(415);
+    expect(c.files()).toEqual([f.id]); // rejected uploads leave no files
+  });
+
+  it("rejects files over the limit with 413", async () => {
+    const c = await setupWithUploads();
+    const res = await upload(c, { name: "big.bin" }, Buffer.alloc(MAX_ATTACHMENT_BYTES + 1)).expect(413);
+    expect(res.body.error).toMatch(/too large.*25 MB/);
+    expect(c.files()).toEqual([]);
+  });
+
+  it("logs uploads and deletes in the project, task and test histories", async () => {
+    const c = await setupWithUploads();
+    const task = (await c.agent.post(`/api/projects/${c.projectId}/tasks`).send({ title: "T" })).body;
+    const test = (await c.agent.post(`/api/projects/${c.projectId}/tests`).send({ title: "X" })).body;
+    const onTask = (await upload(c, { name: "t.txt", taskId: task.id }, "t")).body;
+    await upload(c, { name: "x.txt", testCaseId: test.id }, "x");
+    await c.agent.delete(`/api/attachments/${onTask.id}`).expect(204);
+    expect(c.files()).toHaveLength(1);
+
+    const brief = (items: { entity: string; action: string; label: string }[]) =>
+      items.filter((e) => e.entity === "attachment").map((e) => `${e.action} ${e.label}`);
+    expect(brief((await c.agent.get(`/api/tasks/${task.id}/activity`)).body.items)).toEqual(["deleted t.txt", "created t.txt"]);
+    expect(brief((await c.agent.get(`/api/tests/${test.id}/activity`)).body.items)).toEqual(["created x.txt"]);
+    const projectLog = (await c.agent.get(`/api/projects/${c.projectId}/activity`)).body.items;
+    expect(brief(projectLog)).toEqual(["deleted t.txt", "created x.txt", "created t.txt"]);
+    expect(projectLog[0].diff.size).toEqual({ from: 1, to: null });
+  });
+
+  it("removes files when their task subtree, test case or project is deleted", async () => {
+    const c = await setupWithUploads();
+    const mk = (body: object) => c.agent.post(`/api/projects/${c.projectId}/tasks`).send(body).then((r) => r.body);
+    const parent = await mk({ title: "P" });
+    const child = await mk({ title: "C", parentId: parent.id });
+    const test = (await c.agent.post(`/api/projects/${c.projectId}/tests`).send({ title: "X" })).body;
+    await upload(c, { name: "p", taskId: parent.id }, "p");
+    await upload(c, { name: "c", taskId: child.id }, "c");
+    await upload(c, { name: "x", testCaseId: test.id }, "x");
+    const keep = (await upload(c, { name: "project" }, "k")).body;
+    expect(c.files()).toHaveLength(4);
+
+    await c.agent.delete(`/api/tasks/${parent.id}`).expect(204);
+    await c.agent.delete(`/api/tests/${test.id}`).expect(204);
+    expect(c.files()).toEqual([keep.id]);
+    await c.agent.delete(`/api/projects/${c.projectId}`).expect(204);
+    expect(c.files()).toEqual([]);
+    expect(c.db.prepare(`SELECT COUNT(*) AS n FROM attachments`).get()).toEqual({ n: 0 });
+  });
+
+  it("sweeps orphaned files on startup", async () => {
+    const c = await setupWithUploads();
+    const kept = (await upload(c, { name: "a" }, "a")).body;
+    fs.writeFileSync(path.join(c.dir, "00000000-0000-4000-8000-000000000000"), "x");
+    fs.writeFileSync(path.join(c.dir, "README"), "not ours");
+    expect(sweepOrphanUploads(c.db)).toBe(1);
+    expect(c.files().sort()).toEqual(["README", kept.id].sort());
   });
 });

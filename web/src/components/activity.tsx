@@ -163,6 +163,20 @@ function Sentence({ a, scope, lookup }: { a: Activity; scope: ActivityScope; loo
     case "comment":
       if (scope === "task") return <>{{ created: "commented", updated: "edited a comment", deleted: "deleted a comment" }[a.action]}</>;
       return <>{{ created: "commented on", updated: "edited a comment on", deleted: "deleted a comment on" }[a.action]} {taskName}</>;
+    case "attachment": {
+      const attachedTo = a.diff.testCaseId?.to ?? a.diff.testCaseId?.from;
+      const test = attachedTo ? lookup.tests.find((t) => t.id === attachedTo) : undefined;
+      const file = <b>{a.label}</b>;
+      const what = a.action === "deleted" ? <>removed the file {file}</> : <>attached {file}</>;
+      if (scope !== "project") return what;
+      const where = a.action === "deleted" ? "from" : "to";
+      if (a.taskId) return <>{what} {where} task {taskName}</>;
+      if (attachedTo) {
+        const testName = name(test?.title ?? "a deleted test case", test ? () => dialogs.openTest(test.id) : undefined);
+        return <>{what} {where} test case {testName}</>;
+      }
+      return <>{what} {where} the project</>;
+    }
     case "label":
       return <>{verb} label <b>{a.label}</b></>;
     case "test_case":

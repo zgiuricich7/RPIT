@@ -7,6 +7,9 @@ import { toUser } from "./db/repo.ts";
 import { loadUser, requireUser } from "./auth.ts";
 import { errorHandler, HttpError } from "./http.ts";
 import { trackClientId } from "./events.ts";
+import { config } from "./config.ts";
+import { setUploadsDir } from "./uploads.ts";
+import { attachmentRoutes } from "./routes/attachments.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { projectActivityRoutes } from "./routes/activity.ts";
 import { projectEventRoutes } from "./routes/events.ts";
@@ -20,9 +23,12 @@ import { testCaseRoutes } from "./routes/tests.ts";
 export interface AppOptions {
   /** Serve the built web app from this folder (production). */
   staticDir?: string;
+  /** Where attachment files are stored (default: config.uploadsDir). */
+  uploadsDir?: string;
 }
 
 export function createApp(db: DB, opts: AppOptions = {}) {
+  setUploadsDir(db, opts.uploadsDir ?? config.uploadsDir);
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "1mb" }));
@@ -46,9 +52,11 @@ export function createApp(db: DB, opts: AppOptions = {}) {
   const tasks = taskRoutes(db);
   const tests = testCaseRoutes(db);
   const labels = labelRoutes(db);
+  const attachments = attachmentRoutes(db);
   api.use("/projects/:projectId/tasks", tasks.byProject);
   api.use("/projects/:projectId/tests", tests.byProject);
   api.use("/projects/:projectId/labels", labels.byProject);
+  api.use("/projects/:projectId/attachments", attachments.byProject);
   api.use("/projects/:projectId/members", memberRoutes(db));
   api.use("/projects/:projectId/activity", projectActivityRoutes(db));
   api.use("/projects/:projectId/events", projectEventRoutes(db));
@@ -56,6 +64,7 @@ export function createApp(db: DB, opts: AppOptions = {}) {
   api.use("/tasks", tasks.byId);
   api.use("/tests", tests.byId);
   api.use("/labels", labels.byId);
+  api.use("/attachments", attachments.byId);
   api.use("/comments", commentRoutes(db));
   api.use("/notifications", notificationRoutes(db));
   api.use((_req, _res) => {
