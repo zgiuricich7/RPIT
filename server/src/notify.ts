@@ -21,34 +21,41 @@ interface NotifyInput {
   includeActor?: boolean;
 }
 
-const memberIds = (db: DB, projectId: string) =>
+const memberIds = async (db: DB, projectId: string) =>
   new Set(
-    (db.prepare(`SELECT user_id FROM project_members WHERE project_id = ?`).all(projectId) as { user_id: string }[]).map(
+    (await db.all<{ user_id: string }>(`SELECT user_id FROM project_members WHERE project_id = ?`, projectId)).map(
       (r) => r.user_id,
     ),
   );
 
-export function notify(db: DB, n: NotifyInput) {
-  const members = memberIds(db, n.projectId);
-  const insert = db.prepare(
-    `INSERT INTO notifications (id, user_id, actor_id, project_id, kind, task_id, test_case_id, comment_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  );
+export async function notify(db: DB, n: NotifyInput) {
+  const members = await memberIds(db, n.projectId);
   for (const userId of new Set(n.recipients)) {
     if (!userId || (userId === n.actorId && !n.includeActor) || !members.has(userId)) continue;
-    insert.run(newId(), userId, n.actorId, n.projectId, n.kind, n.taskId ?? null, n.testCaseId ?? null, n.commentId ?? null);
+    await db.run(
+      `INSERT INTO notifications (id, user_id, actor_id, project_id, kind, task_id, test_case_id, comment_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      newId(),
+      userId,
+      n.actorId,
+      n.projectId,
+      n.kind,
+      n.taskId ?? null,
+      n.testCaseId ?? null,
+      n.commentId ?? null,
+    );
   }
 }
 
 /** Notify a new assignee, if the assignee changed to someone. */
-export function notifyAssignment(
+export async function notifyAssignment(
   db: DB,
   a: { kind: "task_assigned" | "test_assigned"; actorId: string; projectId: string; id: string },
   before: string | null | undefined,
   after: string | null | undefined,
 ) {
   if (!after || after === before) return;
-  notify(db, {
+  await notify(db, {
     recipients: [after],
     actorId: a.actorId,
     projectId: a.projectId,
@@ -58,28 +65,30 @@ export function notifyAssignment(
 }
 
 const memberCandidates = (db: DB, projectId: string) =>
-  db
-    .prepare(`SELECT u.id, u.name FROM project_members m JOIN users u ON u.id = m.user_id WHERE m.project_id = ?`)
-    .all(projectId) as { id: string; name: string }[];
+  db.all<{ id: string; name: string }>(
+    `SELECT u.id, u.name FROM project_members m JOIN users u ON u.id = m.user_id WHERE m.project_id = ?`,
+    projectId,
+  );
 
 /**
  * After a comment is edited, replace its stored mentions and notify only the
  * people who weren't mentioned before. Edits don't send reply notifications.
  */
-export function recordCommentEdit(
+export async function recordCommentEdit(
   db: DB,
   c: { commentId: string; taskId: string; projectId: string; authorId: string; body: string },
 ) {
   const before = new Set(
-    (db.prepare(`SELECT user_id FROM comment_mentions WHERE comment_id = ?`).all(c.commentId) as { user_id: string }[]).map(
+    (await db.all<{ user_id: string }>(`SELECT user_id FROM comment_mentions WHERE comment_id = ?`, c.commentId)).map(
       (r) => r.user_id,
     ),
   );
-  const mentioned = mentionedUserIds(c.body, memberCandidates(db, c.projectId));
-  db.prepare(`DELETE FROM comment_mentions WHERE comment_id = ?`).run(c.commentId);
-  const insertMention = db.prepare(`INSERT INTO comment_mentions (comment_id, user_id) VALUES (?, ?)`);
-  for (const userId of mentioned) insertMention.run(c.commentId, userId);
-  notify(db, {
+  const mentioned = mentionedUserIds(c.body, await memberCandidates(db, c.projectId));
+  await db.run(`DELETE FROM comment_mentions WHERE comment_id = ?`, c.commentId);
+  for (const userId of mentioned) {
+    await db.run(`INSERT INTO comment_mentions (comment_id, user_id) VALUES (?, ?)`, c.commentId, userId);
+  }
+  await notify(db, {
     actorId: c.authorId,
     projectId: c.projectId,
     taskId: c.taskId,
@@ -95,23 +104,25 @@ export function recordCommentEdit(
  * - everyone following the task ("reply"): earlier commenters and the assignee,
  *   unless they were already notified of a mention in this comment.
  */
-export function recordCommentActivity(
+export async function recordCommentActivity(
   db: DB,
   c: { commentId: string; taskId: string; projectId: string; authorId: string; body: string },
 ) {
-  const mentioned = mentionedUserIds(c.body, memberCandidates(db, c.projectId));
-  const insertMention = db.prepare(`INSERT INTO comment_mentions (comment_id, user_id) VALUES (?, ?)`);
-  for (const userId of mentioned) insertMention.run(c.commentId, userId);
+  const mentioned = mentionedUserIds(c.body, await memberCandidates(db, c.projectId));
+  for (const userId of mentioned) {
+    await db.run(`INSERT INTO comment_mentions (comment_id, user_id) VALUES (?, ?)`, c.commentId, userId);
+  }
 
   const base = { actorId: c.authorId, projectId: c.projectId, taskId: c.taskId, commentId: c.commentId };
-  notify(db, { ...base, kind: "mention", recipients: mentioned });
+  await notify(db, { ...base, kind: "mention", recipients: mentioned });
 
-  const followers = db
-    .prepare(
-      `SELECT author_id AS id FROM comments WHERE task_id = ? AND id != ?
-       UNION SELECT assignee_id FROM tasks WHERE id = ? AND assignee_id IS NOT NULL`,
-    )
-    .all(c.taskId, c.commentId, c.taskId) as { id: string }[];
+  const followers = await db.all<{ id: string }>(
+    `SELECT author_id AS id FROM comments WHERE task_id = ? AND id != ?
+     UNION SELECT assignee_id FROM tasks WHERE id = ? AND assignee_id IS NOT NULL`,
+    c.taskId,
+    c.commentId,
+    c.taskId,
+  );
   const alreadyNotified = new Set(mentioned);
-  notify(db, { ...base, kind: "reply", recipients: followers.map((f) => f.id).filter((id) => !alreadyNotified.has(id)) });
+  await notify(db, { ...base, kind: "reply", recipients: followers.map((f) => f.id).filter((id) => !alreadyNotified.has(id)) });
 }

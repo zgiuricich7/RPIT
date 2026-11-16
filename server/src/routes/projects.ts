@@ -14,8 +14,8 @@ import { attachmentIds, removeFilesAfterCommit } from "../uploads.ts";
 export function projectRoutes(db: DB) {
   const r = Router();
   const can = requireProjectRole(db);
-  const get = (id: string, userId: string) => {
-    const p = getProjectForUser(db, id, userId);
+  const get = async (id: string, userId: string) => {
+    const p = await getProjectForUser(db, id, userId);
     if (!p) throw notFound("Project");
     return p;
   };
@@ -28,34 +28,32 @@ export function projectRoutes(db: DB) {
   });
 
   /** Only projects the user is a member of. */
-  r.get("/", (req, res) => {
-    const rows = db.prepare(`${PROJECT_SELECT} ORDER BY p.created_at`).all(currentUser(req).id) as Record<
-      string,
-      unknown
-    >[];
+  r.get("/", async (req, res) => {
+    const rows = await db.all(`${PROJECT_SELECT} ORDER BY p.created_at`, currentUser(req).id);
     res.json(rows.map(toProject));
   });
 
   /** The creator becomes the project's owner. */
-  r.post("/", (req, res) => {
+  r.post("/", async (req, res) => {
     const input = parseBody(ProjectInput, req.body);
     const user = currentUser(req);
     const id = newId();
-    transaction(db, () => {
-      db.prepare(`INSERT INTO projects (id, name, description, notify_subtasks_done) VALUES (?, ?, ?, ?)`).run(
+    await transaction(db, async () => {
+      await db.run(
+        `INSERT INTO projects (id, name, description, notify_subtasks_done) VALUES (?, ?, ?, ?)`,
         id,
         input.name,
         input.description,
         input.notifySubtasksDone ? 1 : 0,
       );
-      db.prepare(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'owner')`).run(id, user.id);
-      createDefaultColumns(db, id);
-      logActivity(db, {
+      await db.run(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'owner')`, id, user.id);
+      await createDefaultColumns(db, id);
+      await logActivity(db, {
         ...projectEntry(id, user.id, input.name),
         action: "created",
         diff: snapshot(input, PROJECT_FIELDS, "created"),
       });
-      logActivity(db, {
+      await logActivity(db, {
         projectId: id,
         actorId: user.id,
         entity: "member",
@@ -65,54 +63,63 @@ export function projectRoutes(db: DB) {
         diff: { role: { from: null, to: "owner" } },
       });
     });
-    res.status(201).json(get(id, user.id));
+    res.status(201).json(await get(id, user.id));
   });
 
-  r.get("/:projectId", can("viewer"), (req, res) => {
-    res.json(get(param(req, "projectId"), currentUser(req).id));
+  r.get("/:projectId", can("viewer"), async (req, res) => {
+    res.json(await get(param(req, "projectId"), currentUser(req).id));
   });
 
-  r.patch("/:projectId", can("owner"), (req, res) => {
+  r.patch("/:projectId", can("owner"), async (req, res) => {
     const id = param(req, "projectId");
     const userId = currentUser(req).id;
-    const cur = get(id, userId);
+    const cur = await get(id, userId);
     const p = parseBody(ProjectPatch, req.body);
     const next = {
       name: p.name ?? cur.name,
       description: p.description ?? cur.description,
       notifySubtasksDone: p.notifySubtasksDone ?? cur.notifySubtasksDone,
     };
-    transaction(db, () => {
-      db.prepare(
+    await transaction(db, async () => {
+      await db.run(
         `UPDATE projects SET name = ?, description = ?, notify_subtasks_done = ?, updated_at = ? WHERE id = ?`,
-      ).run(next.name, next.description, next.notifySubtasksDone ? 1 : 0, now(), id);
-      logActivity(db, { ...projectEntry(id, userId, next.name), action: "updated", diff: changes(cur, next, PROJECT_FIELDS) });
+        next.name,
+        next.description,
+        next.notifySubtasksDone ? 1 : 0,
+        now(),
+        id,
+      );
+      await logActivity(db, { ...projectEntry(id, userId, next.name), action: "updated", diff: changes(cur, next, PROJECT_FIELDS) });
       // Turning prompts on sends any that are due now; turning them off withdraws open ones.
-      if (next.notifySubtasksDone !== cur.notifySubtasksDone) syncProjectSubtasksDone(db, id, userId);
+      if (next.notifySubtasksDone !== cur.notifySubtasksDone) await syncProjectSubtasksDone(db, id, userId);
     });
-    res.json(get(id, userId));
+    res.json(await get(id, userId));
   });
 
   /** The project's activity entries are kept (they have no foreign key), ending with this one. */
-  r.delete("/:projectId", can("owner"), (req, res) => {
+  r.delete("/:projectId", can("owner"), async (req, res) => {
     const id = param(req, "projectId");
     const userId = currentUser(req).id;
-    const cur = get(id, userId);
-    transaction(db, () => {
-      logActivity(db, { ...projectEntry(id, userId, cur.name), action: "deleted", diff: snapshot(cur, PROJECT_FIELDS, "deleted") });
-      removeFilesAfterCommit(db, attachmentIds(db, "project_id = ?", [id]));
-      db.prepare(`DELETE FROM projects WHERE id = ?`).run(id);
+    const cur = await get(id, userId);
+    await transaction(db, async () => {
+      await logActivity(db, {
+        ...projectEntry(id, userId, cur.name),
+        action: "deleted",
+        diff: snapshot(cur, PROJECT_FIELDS, "deleted"),
+      });
+      removeFilesAfterCommit(db, await attachmentIds(db, "project_id = ?", [id]));
+      await db.run(`DELETE FROM projects WHERE id = ?`, id);
     });
     res.status(204).end();
   });
 
-  r.get("/:projectId/summary", can("viewer"), (req, res) => {
-    res.json(projectSummary(db, param(req, "projectId")));
+  r.get("/:projectId/summary", can("viewer"), async (req, res) => {
+    res.json(await projectSummary(db, param(req, "projectId")));
   });
 
-  r.get("/:projectId/comments/recent", can("viewer"), (req, res) => {
+  r.get("/:projectId/comments/recent", can("viewer"), async (req, res) => {
     const limit = Math.min(Number(req.query.limit ?? 5) || 5, 50);
-    res.json(recentComments(db, param(req, "projectId"), limit));
+    res.json(await recentComments(db, param(req, "projectId"), limit));
   });
 
   return r;

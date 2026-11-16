@@ -28,19 +28,19 @@ interface Candidate {
 }
 
 /** Send every reminder due on `today` (YYYY-MM-DD). Returns how many were sent. */
-export function sendTaskReminders(db: DB, today: string): number {
+export async function sendTaskReminders(db: DB, today: string): Promise<number> {
   const tomorrow = addDays(today, 1);
-  const tasks = db
-    .prepare(
-      `SELECT id, project_id, assignee_id, start_date, due_date FROM tasks
-       WHERE remind_assignee = 1 AND assignee_id IS NOT NULL AND status != 'done'
-         AND (start_date = ? OR due_date IN (?, ?))`,
-    )
-    .all(today, today, tomorrow) as unknown as Candidate[];
+  const tasks = await db.all<Candidate>(
+    `SELECT id, project_id, assignee_id, start_date, due_date FROM tasks
+     WHERE remind_assignee = 1 AND assignee_id IS NOT NULL AND status != 'done'
+       AND (start_date = ? OR due_date IN (?, ?))`,
+    today,
+    today,
+    tomorrow,
+  );
 
-  const record = db.prepare(`INSERT OR IGNORE INTO task_reminders (task_id, kind, for_date) VALUES (?, ?, ?)`);
   let sent = 0;
-  transaction(db, () => {
+  await transaction(db, async () => {
     for (const t of tasks) {
       const kinds: NotificationKind[] = [];
       if (t.due_date === today) kinds.push("task_due");
@@ -48,8 +48,14 @@ export function sendTaskReminders(db: DB, today: string): number {
       if (t.due_date === tomorrow) kinds.push("task_due_soon");
       for (const kind of kinds) {
         // Only the first run of the day records it; later runs are ignored by the primary key.
-        if (Number(record.run(t.id, kind, today).changes) === 0) continue;
-        notify(db, { recipients: [t.assignee_id], actorId: null, projectId: t.project_id, kind, taskId: t.id });
+        const recorded = await db.run(
+          `INSERT INTO task_reminders (task_id, kind, for_date) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
+          t.id,
+          kind,
+          today,
+        );
+        if (recorded.changes === 0) continue;
+        await notify(db, { recipients: [t.assignee_id], actorId: null, projectId: t.project_id, kind, taskId: t.id });
         sent++;
       }
     }
@@ -60,11 +66,7 @@ export function sendTaskReminders(db: DB, today: string): number {
 /** Run now and then every REMINDER_INTERVAL_MS. Returns a function that stops it. */
 export function startReminderScheduler(db: DB): () => void {
   const run = () => {
-    try {
-      sendTaskReminders(db, toCalendarDate(new Date()));
-    } catch (err) {
-      console.error("Sending task reminders failed", err);
-    }
+    sendTaskReminders(db, toCalendarDate(new Date())).catch((err) => console.error("Sending task reminders failed", err));
   };
   run();
   const timer = setInterval(run, REMINDER_INTERVAL_MS);

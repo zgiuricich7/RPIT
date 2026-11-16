@@ -17,30 +17,38 @@ import { notify } from "./notify.ts";
  *   its prompts are withdrawn.
  * - parent done: prompts are kept as a record; the inbox drops the button.
  */
-export function syncSubtasksDone(db: DB, taskIds: Iterable<string | null | undefined>, actorId: string | null) {
-  const load = db.prepare(
-    `SELECT t.id, t.project_id, t.status, t.assignee_id, p.notify_subtasks_done AS enabled,
-       (SELECT COUNT(*) FROM tasks c WHERE c.parent_id = t.id) AS children,
-       (SELECT COUNT(*) FROM tasks c WHERE c.parent_id = t.id AND c.status != 'done') AS open_children
-     FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?`,
-  );
-  const prompted = db.prepare(`SELECT user_id FROM notifications WHERE task_id = ? AND kind = 'subtasks_done'`);
-  const withdraw = db.prepare(
-    `DELETE FROM notifications WHERE task_id = ? AND kind = 'subtasks_done' AND user_id IS NOT ?`,
-  );
-
+export async function syncSubtasksDone(db: DB, taskIds: Iterable<string | null | undefined>, actorId: string | null) {
   for (const id of new Set(taskIds)) {
     if (!id) continue;
-    const t = load.get(id) as
-      | { id: string; project_id: string; status: string; assignee_id: string | null; enabled: number; children: number; open_children: number }
-      | undefined;
+    const t = await db.get<{
+      id: string;
+      project_id: string;
+      status: string;
+      assignee_id: string | null;
+      enabled: number;
+      children: number;
+      open_children: number;
+    }>(
+      `SELECT t.id, t.project_id, t.status, t.assignee_id, p.notify_subtasks_done AS enabled,
+         (SELECT COUNT(*) FROM tasks c WHERE c.parent_id = t.id) AS children,
+         (SELECT COUNT(*) FROM tasks c WHERE c.parent_id = t.id AND c.status != 'done') AS open_children
+       FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?`,
+      id,
+    );
     if (!t || t.status === "done") continue;
     const recipient = t.enabled && t.children > 0 && t.open_children === 0 ? t.assignee_id : null;
-    withdraw.run(t.id, recipient);
+    await db.run(
+      `DELETE FROM notifications WHERE task_id = ? AND kind = 'subtasks_done' AND user_id IS DISTINCT FROM ?`,
+      t.id,
+      recipient,
+    );
     if (!recipient) continue;
-    const already = (prompted.all(t.id) as { user_id: string }[]).some((r) => r.user_id === recipient);
-    if (!already) {
-      notify(db, {
+    const prompted = await db.all<{ user_id: string }>(
+      `SELECT user_id FROM notifications WHERE task_id = ? AND kind = 'subtasks_done'`,
+      t.id,
+    );
+    if (!prompted.some((r) => r.user_id === recipient)) {
+      await notify(db, {
         recipients: [recipient],
         actorId,
         projectId: t.project_id,
@@ -53,11 +61,12 @@ export function syncSubtasksDone(db: DB, taskIds: Iterable<string | null | undef
 }
 
 /** Re-check every parent task in a project (after the project setting changes). */
-export function syncProjectSubtasksDone(db: DB, projectId: string, actorId: string | null) {
-  const parents = db
-    .prepare(`SELECT DISTINCT parent_id AS id FROM tasks WHERE project_id = ? AND parent_id IS NOT NULL`)
-    .all(projectId) as { id: string }[];
-  syncSubtasksDone(
+export async function syncProjectSubtasksDone(db: DB, projectId: string, actorId: string | null) {
+  const parents = await db.all<{ id: string }>(
+    `SELECT DISTINCT parent_id AS id FROM tasks WHERE project_id = ? AND parent_id IS NOT NULL`,
+    projectId,
+  );
+  await syncSubtasksDone(
     db,
     parents.map((p) => p.id),
     actorId,

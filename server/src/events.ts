@@ -64,8 +64,8 @@ const hubs = new WeakMap<DB, EventHub>();
 
 /** The event hub for a database (one per app; tests each get their own). */
 export function eventHub(db: DB): EventHub {
-  let hub = hubs.get(db);
-  if (!hub) hubs.set(db, (hub = new EventHub()));
+  let hub = hubs.get(db.root);
+  if (!hub) hubs.set(db.root, (hub = new EventHub()));
   return hub;
 }
 

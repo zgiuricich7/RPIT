@@ -48,8 +48,8 @@ export function createApp(db: DB, opts: AppOptions = {}) {
 
   // Everything below requires a signed-in user.
   api.use(requireUser);
-  api.get("/users", (_req, res) => {
-    const rows = db.prepare(`SELECT * FROM users ORDER BY name`).all() as Record<string, unknown>[];
+  api.get("/users", async (_req, res) => {
+    const rows = await db.all(`SELECT * FROM users ORDER BY name`);
     res.json(rows.map(toUser));
   });
 

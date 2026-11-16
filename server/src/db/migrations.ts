@@ -1,6 +1,13 @@
 /**
- * Append-only list of schema migrations. Never edit a migration that has
- * shipped; add a new entry instead. `user_version` tracks what has run.
+ * Append-only lists of schema migrations, one per database. Never edit a
+ * migration that has shipped; add a new entry instead, **to both lists**.
+ *
+ * - `migrations` (SQLite): `PRAGMA user_version` tracks what has run.
+ * - `pgMigrations` (Postgres): the `schema_version` table tracks it. Postgres
+ *   support arrived after SQLite migration 14, so its first entry is the whole
+ *   schema as of then; later changes go in both lists.
+ *
+ * test/api.test.ts checks that both end up with the same tables and columns.
  */
 export const migrations: string[] = [
   /* 1: initial schema */ `
@@ -554,5 +561,261 @@ export const migrations: string[] = [
   CREATE TRIGGER activity_no_delete
   BEFORE DELETE ON activity
   BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
+  `,
+];
+
+/** Timestamps are ISO-8601 text in UTC with milliseconds, like SQLite's strftime('%Y-%m-%dT%H:%M:%fZ','now'). */
+const PG_NOW = `to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
+const PG_DATE = `~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`;
+
+export const pgMigrations: string[] = [
+  /* 1: everything up to SQLite migration 14 (test plans). Tables that SQLite orders by rowid get a seq column. */ `
+  CREATE TABLE users (
+    id            TEXT PRIMARY KEY,
+    email         TEXT NOT NULL UNIQUE,
+    name          TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at    TEXT NOT NULL DEFAULT ${PG_NOW}
+  );
+
+  CREATE TABLE sessions (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TEXT NOT NULL
+  );
+  CREATE INDEX idx_sessions_user ON sessions(user_id);
+
+  CREATE TABLE projects (
+    id                   TEXT PRIMARY KEY,
+    name                 TEXT NOT NULL,
+    description          TEXT NOT NULL DEFAULT '',
+    created_at           TEXT NOT NULL DEFAULT ${PG_NOW},
+    updated_at           TEXT NOT NULL DEFAULT ${PG_NOW},
+    notify_subtasks_done INTEGER NOT NULL DEFAULT 1 CHECK (notify_subtasks_done IN (0, 1))
+  );
+
+  CREATE TABLE project_members (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role       TEXT NOT NULL CHECK (role IN ('owner','editor','viewer')),
+    created_at TEXT NOT NULL DEFAULT ${PG_NOW},
+    PRIMARY KEY (project_id, user_id)
+  );
+  CREATE INDEX idx_members_user ON project_members(user_id);
+
+  CREATE TABLE board_columns (
+    id         TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    category   TEXT NOT NULL CHECK (category IN ('todo','in_progress','in_review','done')),
+    position   DOUBLE PRECISION NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ${PG_NOW}
+  );
+  CREATE UNIQUE INDEX idx_columns_name ON board_columns(project_id, lower(name));
+  CREATE INDEX idx_columns_project ON board_columns(project_id, position);
+
+  CREATE TABLE tasks (
+    id              TEXT PRIMARY KEY,
+    project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    parent_id       TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+    title           TEXT NOT NULL,
+    description     TEXT NOT NULL DEFAULT '',
+    status          TEXT NOT NULL DEFAULT 'todo' CHECK (status IN ('todo','in_progress','in_review','done')),
+    priority        TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('high','medium','low')),
+    assignee_id     TEXT REFERENCES users(id) ON DELETE SET NULL,
+    position        DOUBLE PRECISION NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT ${PG_NOW},
+    updated_at      TEXT NOT NULL DEFAULT ${PG_NOW},
+    start_date      TEXT CHECK (start_date IS NULL OR start_date ${PG_DATE}),
+    due_date        TEXT CHECK (due_date IS NULL OR due_date ${PG_DATE}),
+    remind_assignee INTEGER NOT NULL DEFAULT 0 CHECK (remind_assignee IN (0, 1)),
+    -- No ON DELETE action: the column delete route moves tasks first.
+    column_id       TEXT REFERENCES board_columns(id)
+  );
+  CREATE INDEX idx_tasks_project ON tasks(project_id);
+  CREATE INDEX idx_tasks_parent ON tasks(parent_id);
+  CREATE INDEX idx_tasks_due ON tasks(project_id, due_date);
+  CREATE INDEX idx_tasks_column ON tasks(column_id);
+
+  CREATE TABLE task_reminders (
+    task_id  TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    kind     TEXT NOT NULL,
+    for_date TEXT NOT NULL,
+    PRIMARY KEY (task_id, kind, for_date)
+  );
+
+  CREATE TABLE labels (
+    id         TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    color      TEXT NOT NULL DEFAULT 'gray'
+               CHECK (color IN ('gray','red','orange','yellow','green','teal','blue','purple','pink')),
+    created_at TEXT NOT NULL DEFAULT ${PG_NOW}
+  );
+  CREATE UNIQUE INDEX idx_labels_name ON labels(project_id, lower(name));
+
+  CREATE TABLE task_labels (
+    task_id  TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    label_id TEXT NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+    PRIMARY KEY (task_id, label_id)
+  );
+  CREATE INDEX idx_task_labels_label ON task_labels(label_id);
+
+  CREATE TABLE comments (
+    id         TEXT PRIMARY KEY,
+    task_id    TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    author_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    body       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT ${PG_NOW},
+    edited_at  TEXT
+  );
+  CREATE INDEX idx_comments_task ON comments(task_id);
+
+  CREATE TABLE comment_mentions (
+    comment_id TEXT NOT NULL REFERENCES comments(id) ON DELETE CASCADE,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (comment_id, user_id)
+  );
+  CREATE INDEX idx_mentions_user ON comment_mentions(user_id);
+
+  CREATE TABLE test_suites (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    parent_id   TEXT REFERENCES test_suites(id) ON DELETE SET NULL,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT ${PG_NOW},
+    updated_at  TEXT NOT NULL DEFAULT ${PG_NOW}
+  );
+  CREATE INDEX idx_suites_project ON test_suites(project_id);
+  CREATE INDEX idx_suites_parent ON test_suites(parent_id);
+
+  CREATE TABLE test_cases (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    task_id     TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+    title       TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'not_run' CHECK (status IN ('not_run','passed','failed','blocked')),
+    priority    TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('high','medium','low')),
+    assignee_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    notes       TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT ${PG_NOW},
+    updated_at  TEXT NOT NULL DEFAULT ${PG_NOW},
+    suite_id    TEXT REFERENCES test_suites(id) ON DELETE SET NULL
+  );
+  CREATE INDEX idx_tests_project ON test_cases(project_id);
+  CREATE INDEX idx_tests_suite ON test_cases(suite_id);
+
+  CREATE TABLE test_steps (
+    id           TEXT PRIMARY KEY,
+    test_case_id TEXT NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
+    position     INTEGER NOT NULL,
+    action       TEXT NOT NULL DEFAULT '',
+    expected     TEXT NOT NULL DEFAULT '',
+    UNIQUE (test_case_id, position)
+  );
+
+  CREATE TABLE test_plans (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    due_date    TEXT CHECK (due_date IS NULL OR due_date ${PG_DATE}),
+    closed_at   TEXT,
+    created_at  TEXT NOT NULL DEFAULT ${PG_NOW},
+    updated_at  TEXT NOT NULL DEFAULT ${PG_NOW}
+  );
+  CREATE INDEX idx_plans_project ON test_plans(project_id);
+
+  CREATE TABLE test_plan_items (
+    plan_id      TEXT NOT NULL REFERENCES test_plans(id) ON DELETE CASCADE,
+    test_case_id TEXT NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
+    added_at     TEXT NOT NULL DEFAULT ${PG_NOW},
+    PRIMARY KEY (plan_id, test_case_id)
+  );
+  CREATE INDEX idx_plan_items_test ON test_plan_items(test_case_id);
+
+  CREATE TABLE test_runs (
+    id           TEXT PRIMARY KEY,
+    test_case_id TEXT NOT NULL REFERENCES test_cases(id) ON DELETE CASCADE,
+    status       TEXT NOT NULL CHECK (status IN ('not_run','passed','failed','blocked')),
+    run_by       TEXT REFERENCES users(id) ON DELETE SET NULL,
+    notes        TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL DEFAULT ${PG_NOW},
+    plan_id      TEXT REFERENCES test_plans(id) ON DELETE SET NULL,
+    seq          BIGSERIAL NOT NULL
+  );
+  CREATE INDEX idx_test_runs_case ON test_runs(test_case_id, created_at);
+  CREATE INDEX idx_test_runs_plan ON test_runs(plan_id, test_case_id);
+
+  CREATE TABLE attachments (
+    id           TEXT PRIMARY KEY,
+    project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    task_id      TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+    test_case_id TEXT REFERENCES test_cases(id) ON DELETE CASCADE,
+    uploader_id  TEXT REFERENCES users(id) ON DELETE SET NULL,
+    filename     TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size         INTEGER NOT NULL CHECK (size >= 0),
+    created_at   TEXT NOT NULL DEFAULT ${PG_NOW},
+    seq          BIGSERIAL NOT NULL,
+    CHECK (task_id IS NULL OR test_case_id IS NULL)
+  );
+  CREATE INDEX idx_attachments_project ON attachments(project_id);
+  CREATE INDEX idx_attachments_task ON attachments(task_id);
+  CREATE INDEX idx_attachments_test ON attachments(test_case_id);
+
+  CREATE TABLE notifications (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    actor_id     TEXT REFERENCES users(id) ON DELETE SET NULL,
+    project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    kind         TEXT NOT NULL CHECK (kind IN ('task_assigned','test_assigned','mention','reply',
+                                               'task_starts','task_due_soon','task_due','subtasks_done')),
+    task_id      TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+    test_case_id TEXT REFERENCES test_cases(id) ON DELETE CASCADE,
+    comment_id   TEXT REFERENCES comments(id) ON DELETE CASCADE,
+    read_at      TEXT,
+    created_at   TEXT NOT NULL DEFAULT ${PG_NOW},
+    seq          BIGSERIAL NOT NULL
+  );
+  CREATE INDEX idx_notifications_user ON notifications(user_id, created_at);
+  CREATE INDEX idx_notifications_task ON notifications(task_id, kind);
+
+  -- The audit log. No foreign keys on project/entity/task ids so entries outlive what they describe.
+  -- seq is the pagination cursor (SQLite uses rowid).
+  CREATE TABLE activity (
+    id         TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    actor_id   TEXT REFERENCES users(id) ON DELETE SET NULL,
+    entity     TEXT NOT NULL CHECK (entity IN ('project','member','task','comment','test_case','label','attachment',
+                                               'column','test_run','test_suite','test_plan')),
+    entity_id  TEXT NOT NULL,
+    task_id    TEXT,
+    action     TEXT NOT NULL CHECK (action IN ('created','updated','deleted')),
+    label      TEXT NOT NULL DEFAULT '',
+    diff       TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT ${PG_NOW},
+    seq        BIGSERIAL NOT NULL UNIQUE
+  );
+  CREATE INDEX idx_activity_project ON activity(project_id);
+  CREATE INDEX idx_activity_task ON activity(task_id);
+  CREATE INDEX idx_activity_entity ON activity(entity, entity_id);
+
+  -- Append-only. The only permitted change is actor_id becoming NULL when a user is deleted.
+  CREATE FUNCTION activity_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
+  BEGIN
+    IF TG_OP = 'DELETE'
+       OR NEW.id IS DISTINCT FROM OLD.id OR NEW.project_id IS DISTINCT FROM OLD.project_id
+       OR NEW.entity IS DISTINCT FROM OLD.entity OR NEW.entity_id IS DISTINCT FROM OLD.entity_id
+       OR NEW.task_id IS DISTINCT FROM OLD.task_id OR NEW.action IS DISTINCT FROM OLD.action
+       OR NEW.label IS DISTINCT FROM OLD.label OR NEW.diff IS DISTINCT FROM OLD.diff
+       OR NEW.created_at IS DISTINCT FROM OLD.created_at OR NEW.seq IS DISTINCT FROM OLD.seq THEN
+      RAISE EXCEPTION 'activity log is append-only';
+    END IF;
+    RETURN NEW;
+  END $$;
+  CREATE TRIGGER activity_no_update BEFORE UPDATE ON activity FOR EACH ROW EXECUTE FUNCTION activity_append_only();
+  CREATE TRIGGER activity_no_delete BEFORE DELETE ON activity FOR EACH ROW EXECUTE FUNCTION activity_append_only();
   `,
 ];

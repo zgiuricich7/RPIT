@@ -42,6 +42,7 @@ export function projectEventRoutes(db: DB) {
     res.write("retry: 3000\n\n");
 
     let closed = false;
+    let queue: Promise<void> = Promise.resolve();
     const close = () => {
       if (closed) return;
       closed = true;
@@ -52,15 +53,18 @@ export function projectEventRoutes(db: DB) {
 
     const unsubscribe = eventHub(db).subscribe(projectId, {
       clientId,
+      // Sends are chained so events stay in order while an access check is awaited.
       send: (event: ProjectEvent) => {
-        if (closed) return;
-        // Membership and project changes can revoke access: re-check before sending more.
-        if ((event.entity === "member" || event.entity === "project") && !getMemberRole(db, projectId, userId)) {
-          res.write("event: removed\ndata: {}\n\n");
-          close();
-          return;
-        }
-        res.write(`event: change\ndata: ${JSON.stringify(event)}\n\n`);
+        queue = queue.then(async () => {
+          if (closed) return;
+          // Membership and project changes can revoke access: re-check before sending more.
+          if ((event.entity === "member" || event.entity === "project") && !(await getMemberRole(db, projectId, userId))) {
+            res.write("event: removed\ndata: {}\n\n");
+            close();
+            return;
+          }
+          res.write(`event: change\ndata: ${JSON.stringify(event)}\n\n`);
+        }).catch((err) => console.error("Event stream send failed", err));
       },
     });
 

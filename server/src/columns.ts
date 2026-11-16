@@ -12,9 +12,17 @@ import { HttpError } from "./http.ts";
  */
 
 /** The four columns a new project starts with. Call inside the project's create transaction. */
-export function createDefaultColumns(db: DB, projectId: string) {
-  const insert = db.prepare(`INSERT INTO board_columns (id, project_id, name, category, position) VALUES (?, ?, ?, ?, ?)`);
-  DEFAULT_COLUMNS.forEach((c, i) => insert.run(newId(), projectId, c.name, c.category, i + 1));
+export async function createDefaultColumns(db: DB, projectId: string) {
+  for (const [i, c] of DEFAULT_COLUMNS.entries()) {
+    await db.run(
+      `INSERT INTO board_columns (id, project_id, name, category, position) VALUES (?, ?, ?, ?, ?)`,
+      newId(),
+      projectId,
+      c.name,
+      c.category,
+      i + 1,
+    );
+  }
 }
 
 /**
@@ -24,18 +32,18 @@ export function createDefaultColumns(db: DB, projectId: string) {
  *   the first column (left to right) with it;
  * - neither: the current column, or the first column for a new task.
  */
-export function resolveColumn(
+export async function resolveColumn(
   db: DB,
   projectId: string,
   want: { columnId?: string; status?: TaskStatus },
   current?: BoardColumn,
-): BoardColumn {
+): Promise<BoardColumn> {
   if (want.columnId) {
-    const c = current?.id === want.columnId ? current : getColumn(db, want.columnId);
+    const c = current?.id === want.columnId ? current : await getColumn(db, want.columnId);
     if (!c || c.projectId !== projectId) throw new HttpError(400, "Column must be on this project's board");
     return c;
   }
-  const columns = listColumns(db, projectId);
+  const columns = await listColumns(db, projectId);
   if (want.status) {
     if (current?.category === want.status) return current;
     const c = columns.find((col) => col.category === want.status);

@@ -66,10 +66,10 @@ export const byComment: ProjectResolver = {
  */
 export function requireProjectRole(db: DB) {
   return (min: ProjectRole, resolver: ProjectResolver = byProject) =>
-    (req: Request, _res: Response, next: NextFunction) => {
-      const row = db.prepare(resolver.sql).get(param(req, resolver.param)) as { project_id: string } | undefined;
+    async (req: Request, _res: Response, next: NextFunction) => {
+      const row = await db.get<{ project_id: string }>(resolver.sql, param(req, resolver.param));
       if (!row) throw notFound(resolver.what);
-      const role = getMemberRole(db, row.project_id, currentUser(req).id);
+      const role = await getMemberRole(db, row.project_id, currentUser(req).id);
       if (!role) throw notFound(resolver.what);
       if (!hasRole(role, min)) {
         throw new HttpError(403, `You need ${PROJECT_ROLE_LABELS[min].toLowerCase()} access to do this`);

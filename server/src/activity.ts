@@ -23,14 +23,13 @@ type Fields<T> = readonly (keyof T & string)[];
  * from before custom columns hold the built-in status key, e.g. "in_review".)
  */
 export type AuditedTask = Omit<Task, "status"> & { status: string; labels: string | null };
-export function auditedTask(db: DB, t: Task): AuditedTask {
-  const column = db.prepare(`SELECT name FROM board_columns WHERE id = ?`).get(t.columnId) as { name: string } | undefined;
-  const names = db
-    .prepare(
-      `SELECT l.name FROM task_labels tl JOIN labels l ON l.id = tl.label_id
-       WHERE tl.task_id = ? ORDER BY l.name COLLATE NOCASE, l.id`,
-    )
-    .all(t.id) as { name: string }[];
+export async function auditedTask(db: DB, t: Task): Promise<AuditedTask> {
+  const column = await db.get<{ name: string }>(`SELECT name FROM board_columns WHERE id = ?`, t.columnId);
+  const names = await db.all<{ name: string }>(
+    `SELECT l.name FROM task_labels tl JOIN labels l ON l.id = tl.label_id
+     WHERE tl.task_id = ? ORDER BY lower(l.name), l.id`,
+    t.id,
+  );
   return { ...t, status: column?.name ?? t.status, labels: names.length ? names.map((n) => n.name).join(", ") : null };
 }
 
@@ -103,12 +102,21 @@ export interface ActivityInput {
 }
 
 /** Records one entry. Updates with an empty diff are no-ops and aren't logged. */
-export function logActivity(db: DB, a: ActivityInput) {
+export async function logActivity(db: DB, a: ActivityInput) {
   if (a.action === "updated" && !Object.keys(a.diff).length) return;
-  db.prepare(
+  await db.run(
     `INSERT INTO activity (id, project_id, actor_id, entity, entity_id, task_id, action, label, diff)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(newId(), a.projectId, a.actorId, a.entity, a.entityId, a.taskId ?? null, a.action, a.label, JSON.stringify(a.diff));
+    newId(),
+    a.projectId,
+    a.actorId,
+    a.entity,
+    a.entityId,
+    a.taskId ?? null,
+    a.action,
+    a.label,
+    JSON.stringify(a.diff),
+  );
   publishEvent(db, {
     projectId: a.projectId,
     actorId: a.actorId,

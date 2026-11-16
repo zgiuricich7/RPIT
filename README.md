@@ -39,7 +39,8 @@ and test case tracking — with a per-project overview dashboard.
 
 ## Quick start
 
-Requires Node.js 22.13 or newer (it uses the built-in `node:sqlite` module, so there is nothing native to compile).
+Requires Node.js 22.13 or newer. By default it stores data in SQLite through the built-in `node:sqlite` module,
+so there is nothing native to compile and no database server to run. Postgres is supported too (see below).
 
 ```bash
 npm install
@@ -49,6 +50,19 @@ npm run dev
 
 Open http://localhost:5173 and sign in with `demo@rpit.dev` / `rpit-demo`,
 or create an account.
+
+## Databases
+
+SQLite is the default and needs no setup. To use Postgres, create an empty database and set `DATABASE_URL`;
+the schema is created on first start (`npm run seed` works on either):
+
+```bash
+DATABASE_URL=postgres://rpit:secret@localhost:5432/rpit npm run dev
+DATABASE_URL=pglite:./server/data/pg npm run dev    # embedded Postgres in a folder, no server needed
+```
+
+`npm test` runs the API tests against both SQLite and Postgres (via PGlite), so no Postgres install is needed
+to test. Existing SQLite data isn't copied over automatically; a new Postgres database starts empty.
 
 ## Production
 
@@ -62,7 +76,8 @@ Configuration (environment variables, or a `.env` file in the repo root — see 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `3001` | HTTP port |
-| `DATABASE_PATH` | `server/data/rpit.db` | SQLite file location |
+| `DATABASE_URL` | unset | Use Postgres: `postgres://user:pass@host:5432/db`, or `pglite:<folder>` for embedded Postgres (no server). Unset means SQLite |
+| `DATABASE_PATH` | `server/data/rpit.db` | SQLite file location (when `DATABASE_URL` is unset) |
 | `SESSION_DAYS` | `30` | Session cookie lifetime |
 | `NODE_ENV` | — | `production` serves `web/dist` and marks cookies `Secure` (use HTTPS) |
 

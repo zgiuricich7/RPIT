@@ -21,14 +21,10 @@ declare global {
 export const hashPassword = (pw: string) => bcrypt.hash(pw, 10);
 export const verifyPassword = (pw: string, hash: string) => bcrypt.compare(pw, hash);
 
-export function createSession(db: DB, res: Response, userId: string) {
+export async function createSession(db: DB, res: Response, userId: string) {
   const id = crypto.randomBytes(32).toString("base64url");
   const expires = new Date(Date.now() + config.sessionDays * 86_400_000);
-  db.prepare(`INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)`).run(
-    id,
-    userId,
-    expires.toISOString(),
-  );
+  await db.run(`INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)`, id, userId, expires.toISOString());
   res.cookie(SESSION_COOKIE, id, {
     httpOnly: true,
     sameSite: "lax",
@@ -38,22 +34,23 @@ export function createSession(db: DB, res: Response, userId: string) {
   });
 }
 
-export function destroySession(db: DB, req: Request, res: Response) {
+export async function destroySession(db: DB, req: Request, res: Response) {
   const id = req.cookies?.[SESSION_COOKIE];
-  if (id) db.prepare(`DELETE FROM sessions WHERE id = ?`).run(id);
+  if (id) await db.run(`DELETE FROM sessions WHERE id = ?`, id);
   res.clearCookie(SESSION_COOKIE, { path: "/" });
 }
 
 /** Attaches req.user when a valid session cookie is present. */
 export function loadUser(db: DB) {
-  const stmt = db.prepare(
-    `SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
-     WHERE s.id = ? AND s.expires_at > ?`,
-  );
-  return (req: Request, _res: Response, next: NextFunction) => {
+  return async (req: Request, _res: Response, next: NextFunction) => {
     const id = req.cookies?.[SESSION_COOKIE];
     if (id) {
-      const row = stmt.get(id, new Date().toISOString()) as Record<string, unknown> | undefined;
+      const row = await db.get(
+        `SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
+         WHERE s.id = ? AND s.expires_at > ?`,
+        id,
+        new Date().toISOString(),
+      );
       if (row) req.user = toUser(row);
     }
     next();

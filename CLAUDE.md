@@ -14,7 +14,8 @@ Run from the repo root.
 | `npm install` | Install all workspaces |
 | `npm run seed` | Create demo users + a sample project (`demo@rpit.dev` / `rpit-demo`) |
 | `npm run dev` | API on :3001 (tsx watch) + Vite on :5173 with `/api` proxied |
-| `npm test` | Vitest: shared tree utils + API integration tests (in-memory SQLite) |
+| `npm test` | Vitest: shared utils + API integration tests, run twice: SQLite and Postgres (PGlite) |
+| `npx vitest run --project sqlite` (in `server/`) | Just one database (`sqlite` or `postgres`) |
 | `npm run typecheck` | `tsc` across all three workspaces |
 | `npm run build` | Build web to `web/dist`, bundle server to `server/dist` |
 | `NODE_ENV=production npm start` | Serve API and built web app together on :3001 |
@@ -32,10 +33,11 @@ shared/   @rpit/shared — zod schemas, enums, labels, response types, tree util
           test coverage (coverage.ts: taskCoverage roll-up, coverageState, coverageSummary),
           Markdown toolbar text transforms (markdown.ts, pure functions with tests).
           Imported as TypeScript source by both server and web (no build step).
-server/   Express 5 API on Node's built-in SQLite (node:sqlite, no native deps)
+server/   Express 5 API on SQLite (node:sqlite, the default) or Postgres (`pg`, or PGlite in-process)
   src/app.ts          createApp(db) — mounts all routes; used by index.ts and tests
-  src/db/migrations.ts  append-only SQL migrations, tracked with PRAGMA user_version
-  src/db/repo.ts      row → API mappers, shared queries, project summary
+  src/db/index.ts     the async DB interface (all/get/run/exec/transaction) and its SQLite/Postgres adapters
+  src/db/migrations.ts  append-only migrations: `migrations` (SQLite, PRAGMA user_version) and `pgMigrations`
+  src/db/repo.ts      row → API mappers, shared queries, project summary, dialect helpers (jsonArray, rowOrder…)
   src/routes/*.ts     one file per resource (labels.ts also exports checkLabels / setTaskLabels for tasks)
   src/auth.ts         bcrypt passwords, opaque session id in an httpOnly cookie
   src/access.ts       requireProjectRole middleware + project resolvers
@@ -49,7 +51,8 @@ server/   Express 5 API on Node's built-in SQLite (node:sqlite, no native deps)
   src/events.ts       in-process EventHub: logActivity publishes a ProjectEvent after commit
   src/routes/events.ts  GET /api/projects/:id/events — server-sent event stream per project
   src/routes/dashboard.ts  GET /api/dashboard?today= — home page data across the user's projects
-  test/api.test.ts    supertest against an in-memory DB
+  test/db.ts          freshDb()/isolatedDb() for tests; RPIT_TEST_DB picks SQLite or PGlite (vitest.config.ts)
+  test/api.test.ts    supertest against a fresh DB per test
   test/events.test.ts event stream tests (real listening server + fetch, since supertest buffers)
 web/      React 19 + Vite + TanStack Query + React Router 7
   src/api/client.ts   fetch wrapper (throws ApiRequestError with fieldErrors)
@@ -151,7 +154,24 @@ docs/ROADMAP.md       prioritised backlog
 - **Patch schemas must not have defaults.** Don't write `Input.partial()` when `Input` uses `.default()`:
   zod still applies the defaults, which resets every field the client didn't send.
 - **API is camelCase, DB is snake_case.** All translation happens in `server/src/db/repo.ts` mappers.
-- **Migrations are append-only.** Never edit an existing entry in `migrations.ts`; add a new one.
+- **Migrations are append-only.** Never edit an existing entry in `migrations.ts`; add a new one **to both
+  `migrations` (SQLite) and `pgMigrations` (Postgres)**. Postgres started from one migration equal to SQLite's
+  schema after migration 14, so the two lists have different lengths. A test (Postgres run) checks both end up with
+  the same tables and columns. Postgres has `seq BIGSERIAL` where SQLite code relies on `rowid` (activity,
+  notifications, test_runs, attachments); use `rowOrder(db, alias)` for those. Store timestamps as ISO text,
+  `REAL` positions as `DOUBLE PRECISION` (not `REAL`, which is 4-byte in Postgres).
+- **Database access is async and dialect-neutral.** Use `await db.all/get/run(sql, ...params)` with `?`
+  placeholders; there are no prepared statements to keep. Write SQL both databases run: `lower(x)` instead of
+  `COLLATE NOCASE`, `ON CONFLICT DO NOTHING` instead of `INSERT OR IGNORE`, `IS DISTINCT FROM` instead of
+  `IS NOT ?`, `CAST(? AS TEXT)` for a bare parameter in a SELECT list (recursive CTEs), an alias on every derived
+  table, `SELECT 1 AS hit` rather than an unnamed column. Where they truly differ, branch on `db.dialect` via the
+  helpers in `repo.ts` (`jsonArray`, `jsonObject`, `jsonText`, `rowOrder`). JSON columns come back parsed on
+  Postgres and as text on SQLite: mappers go through `parseJson`. Counts are numbers on both.
+- **Transactions follow the call chain.** `await transaction(db, async () => { ... })`: every query made through
+  `db` inside it (including helpers that closed over `db`) runs in the transaction, via AsyncLocalStorage, so
+  helpers don't need a transaction handle passed in. Await every call inside a transaction: a floating promise
+  would run after commit or race it. Never await unrelated I/O (network, bcrypt) inside one: on SQLite all other
+  queries wait for the transaction to finish.
 - **Errors:** throw `HttpError(status, message)` (or `notFound("Thing")`). Express 5 forwards async
   throws to `errorHandler`. Validation errors return `{ error, fieldErrors }`.
 - **Tree rules are enforced server-side:** parent must be in the same project and can't be the task
@@ -260,6 +280,7 @@ docs/ROADMAP.md       prioritised backlog
 - The activity log covers project-scoped actions only: sign-ins, sign-ups and inbox read state aren't logged.
   Rows for deleted projects are kept but no API exposes them.
 - Keyboard drag and drop reorders but can't nest or un-nest in the list (use the task dialog's parent picker).
-- SQLite single file; fine for a team on one server. Postgres is on the roadmap.
+- SQLite (default) is a single file, fine for a team on one server; set `DATABASE_URL` for Postgres. There's no
+  tool yet to copy an existing SQLite database into Postgres: a new Postgres database starts empty.
 - Attachments are on the local disk next to the database (back up both); no object storage, previews beyond
   images, or virus scanning. Uploads are buffered in memory (25 MB max). Markdown images still render as links.

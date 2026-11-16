@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp } from "../src/app.ts";
-import { openDatabase } from "../src/db/index.ts";
+import type { DB } from "../src/db/index.ts";
+import { rowOrder } from "../src/db/repo.ts";
+import { freshDb, isolatedDb, onSqlite, testDialect } from "./db.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,9 +11,9 @@ import { MAX_ATTACHMENT_BYTES } from "@rpit/shared";
 import { sendTaskReminders } from "../src/reminders.ts";
 import { sweepOrphanUploads } from "../src/uploads.ts";
 
-/** Fresh in-memory DB + signed-in agent for each test. */
+/** Fresh DB + signed-in agent for each test. */
 async function setup() {
-  const db = openDatabase(":memory:");
+  const db = await freshDb();
   const agent = request.agent(createApp(db));
   const me = await agent
     .post("/api/auth/register")
@@ -28,12 +30,12 @@ beforeEach(async () => {
 
 describe("auth", () => {
   it("rejects API calls without a session", async () => {
-    const db = openDatabase(":memory:");
+    const db = await isolatedDb();
     await request(createApp(db)).get("/api/projects").expect(401);
   });
 
   it("logs in and out", async () => {
-    const db = openDatabase(":memory:");
+    const db = await isolatedDb();
     const a = request.agent(createApp(db));
     await a.post("/api/auth/register").send({ name: "A", email: "a@x.com", password: "password123" }).expect(201);
     await a.post("/api/auth/logout").expect(204);
@@ -44,7 +46,7 @@ describe("auth", () => {
   });
 
   it("returns field errors for invalid input", async () => {
-    const db = openDatabase(":memory:");
+    const db = await isolatedDb();
     const res = await request(createApp(db))
       .post("/api/auth/register")
       .send({ name: "", email: "nope", password: "short" })
@@ -126,7 +128,7 @@ describe("comments", () => {
 });
 
 /** Registers a second user on the same DB and returns their agent. */
-async function signUp(db: ReturnType<typeof openDatabase>, name: string, email: string) {
+async function signUp(db: DB, name: string, email: string) {
   const a = request.agent(createApp(db));
   await a.post("/api/auth/register").send({ name, email, password: "password123" }).expect(201);
   return a;
@@ -262,18 +264,18 @@ describe("project membership and roles", () => {
     expect((await agent.get(`/api/tests/${tc.id}`)).body.assigneeId).toBeNull();
   });
 
-  it("backfills existing projects so every existing user keeps access", async () => {
+  it.skipIf(!onSqlite)("backfills existing projects so every existing user keeps access", async () => {
     // Simulate a database at schema version 1 with data, then run the membership migration.
     const { DatabaseSync } = await import("node:sqlite");
     const { migrations } = await import("../src/db/migrations.ts");
-    const { migrate } = await import("../src/db/index.ts");
+    const { migrate, fromSqlite } = await import("../src/db/index.ts");
     const raw = new DatabaseSync(":memory:");
     raw.exec("PRAGMA foreign_keys = ON");
     raw.exec(migrations[0]!);
     raw.exec("PRAGMA user_version = 1");
     raw.exec(`INSERT INTO users (id, email, name, password_hash) VALUES ('u1','a@x','A','h'), ('u2','b@x','B','h')`);
     raw.exec(`INSERT INTO projects (id, name) VALUES ('p1','P1')`);
-    migrate(raw);
+    await migrate(fromSqlite(raw));
     expect(raw.prepare(`SELECT user_id, role FROM project_members ORDER BY user_id`).all()).toEqual([
       { user_id: "u1", role: "owner" },
       { user_id: "u2", role: "owner" },
@@ -318,8 +320,8 @@ describe("test cases and summary", () => {
     await agent.post(`/api/projects/${projectId}/tasks`).send({ title: "A" });
     await agent.post(`/api/projects/${projectId}/tests`).send({ title: "T" });
     await agent.delete(`/api/projects/${projectId}`).expect(204);
-    expect(db.prepare(`SELECT COUNT(*) AS n FROM tasks`).get()).toEqual({ n: 0 });
-    expect(db.prepare(`SELECT COUNT(*) AS n FROM test_cases`).get()).toEqual({ n: 0 });
+    expect(await db.get(`SELECT COUNT(*) AS n FROM tasks`)).toEqual({ n: 0 });
+    expect(await db.get(`SELECT COUNT(*) AS n FROM test_cases`)).toEqual({ n: 0 });
   });
 });
 
@@ -437,7 +439,7 @@ describe("mentions and notifications", () => {
   });
 
   it("requires a session", async () => {
-    const db = openDatabase(":memory:");
+    const db = await isolatedDb();
     await request(createApp(db)).get("/api/notifications").expect(401);
   });
 });
@@ -458,7 +460,7 @@ describe("activity log", () => {
     expect(items[0]!.actorName).toBe("Tester");
 
     await agent.delete(`/api/projects/${projectId}`).expect(204);
-    const kept = db.prepare(`SELECT entity, action FROM activity WHERE project_id = ? ORDER BY rowid`).all(projectId);
+    const kept = await db.all(`SELECT entity, action FROM activity a WHERE project_id = ? ORDER BY ${rowOrder(db, "a")}`, projectId);
     expect(kept.at(-1)).toEqual({ entity: "project", action: "deleted" });
   });
 
@@ -546,9 +548,9 @@ describe("activity log", () => {
 
   it("is append-only at the database level", async () => {
     const { db, projectId } = ctx;
-    expect(() => db.exec(`UPDATE activity SET label = 'x'`)).toThrow(/append-only/);
-    expect(() => db.exec(`DELETE FROM activity`)).toThrow(/append-only/);
-    expect(db.prepare(`SELECT COUNT(*) AS n FROM activity WHERE project_id = ?`).get(projectId)).toEqual({ n: 2 });
+    await expect(db.exec(`UPDATE activity SET label = 'x'`)).rejects.toThrow(/append-only/);
+    await expect(db.exec(`DELETE FROM activity`)).rejects.toThrow(/append-only/);
+    expect(await db.get(`SELECT COUNT(*) AS n FROM activity WHERE project_id = ?`, projectId)).toEqual({ n: 2 });
   });
 });
 
@@ -675,31 +677,31 @@ describe("due-date reminders", () => {
     const t = (await mk({ startDate: "2026-03-01", dueDate: "2026-03-05", remindAssignee: true })).body;
     expect(t.remindAssignee).toBe(true);
 
-    expect(sendTaskReminders(ctx.db, "2026-02-28")).toBe(0);
-    expect(sendTaskReminders(ctx.db, "2026-03-01")).toBe(1);
-    expect(sendTaskReminders(ctx.db, "2026-03-01")).toBe(0); // already sent today
-    expect(sendTaskReminders(ctx.db, "2026-03-04")).toBe(1);
-    expect(sendTaskReminders(ctx.db, "2026-03-05")).toBe(1);
+    expect(await sendTaskReminders(ctx.db, "2026-02-28")).toBe(0);
+    expect(await sendTaskReminders(ctx.db, "2026-03-01")).toBe(1);
+    expect(await sendTaskReminders(ctx.db, "2026-03-01")).toBe(0); // already sent today
+    expect(await sendTaskReminders(ctx.db, "2026-03-04")).toBe(1);
+    expect(await sendTaskReminders(ctx.db, "2026-03-05")).toBe(1);
     const items = await inbox();
     expect(items.map((n) => n.kind)).toEqual(["task_due", "task_due_soon", "task_starts"]);
     expect(items.every((n) => n.taskId === t.id && n.actorId === null)).toBe(true);
 
     // Moving the due date allows a new reminder for the new date.
     await ctx.agent.patch(`/api/tasks/${t.id}`).send({ dueDate: "2026-03-10" }).expect(200);
-    expect(sendTaskReminders(ctx.db, "2026-03-10")).toBe(1);
+    expect(await sendTaskReminders(ctx.db, "2026-03-10")).toBe(1);
   });
 
   it("sends nothing unless opted in, assigned and still open", async () => {
     await mk({ dueDate: "2026-03-05" }); // not opted in
     await mk({ dueDate: "2026-03-05", remindAssignee: true, assigneeId: null });
     await mk({ dueDate: "2026-03-05", remindAssignee: true, status: "done" });
-    expect(sendTaskReminders(ctx.db, "2026-03-05")).toBe(0);
+    expect(await sendTaskReminders(ctx.db, "2026-03-05")).toBe(0);
     expect(await inbox()).toEqual([]);
   });
 
   it("sends one due reminder when a task starts and is due the same day", async () => {
     await mk({ startDate: "2026-03-05", dueDate: "2026-03-05", remindAssignee: true });
-    expect(sendTaskReminders(ctx.db, "2026-03-05")).toBe(1);
+    expect(await sendTaskReminders(ctx.db, "2026-03-05")).toBe(1);
     expect((await inbox()).map((n) => n.kind)).toEqual(["task_due"]);
   });
 
@@ -803,7 +805,7 @@ describe("moving tasks (drag and drop)", () => {
 
   it("orders tied positions deterministically, by id", async () => {
     const tasks = [await mk("A"), await mk("B"), await mk("C")];
-    ctx.db.prepare(`UPDATE tasks SET position = 1, created_at = '2026-01-01T00:00:00.000Z'`).run();
+    await ctx.db.run(`UPDATE tasks SET position = 1, created_at = '2026-01-01T00:00:00.000Z'`);
     const expected = [...tasks].sort((x, y) => (x.id < y.id ? -1 : 1)).map((t) => t.id);
     for (let i = 0; i < 3; i++) {
       const list = (await ctx.agent.get(`/api/projects/${ctx.projectId}/tasks`).expect(200)).body as { id: string }[];
@@ -914,24 +916,24 @@ describe("labels", () => {
     const bug = (await mkLabel("Bug")).body;
     const t = (await mkTask({ title: "A", labelIds: [bug.id] })).body;
     await agent.delete(`/api/tasks/${t.id}`).expect(204);
-    expect(db.prepare(`SELECT COUNT(*) AS n FROM task_labels`).get()).toEqual({ n: 0 });
+    expect(await db.get(`SELECT COUNT(*) AS n FROM task_labels`)).toEqual({ n: 0 });
     await agent.delete(`/api/projects/${projectId}`).expect(204);
-    expect(db.prepare(`SELECT COUNT(*) AS n FROM labels`).get()).toEqual({ n: 0 });
+    expect(await db.get(`SELECT COUNT(*) AS n FROM labels`)).toEqual({ n: 0 });
   });
 });
 
-describe("migration 7 (labels)", () => {
+describe.skipIf(!onSqlite)("migration 7 (labels)", () => {
   it("keeps existing activity entries, their order and the append-only triggers", async () => {
     const { DatabaseSync } = await import("node:sqlite");
     const { migrations } = await import("../src/db/migrations.ts");
-    const { migrate } = await import("../src/db/index.ts");
+    const { migrate, fromSqlite } = await import("../src/db/index.ts");
     const db = new DatabaseSync(":memory:");
     db.exec("PRAGMA foreign_keys = ON");
     for (const m of migrations.slice(0, 6)) db.exec(m);
     db.exec("PRAGMA user_version = 6");
     const add = db.prepare(`INSERT INTO activity (id, project_id, entity, entity_id, action) VALUES (?, 'p', 'task', 't', 'created')`);
     for (const id of ["z", "a", "m"]) add.run(id);
-    migrate(db);
+    await migrate(fromSqlite(db));
 
     const rows = db.prepare(`SELECT rowid AS seq, id FROM activity ORDER BY rowid`).all();
     expect(rows).toEqual([{ seq: 1, id: "z" }, { seq: 2, id: "a" }, { seq: 3, id: "m" }]);
@@ -1034,7 +1036,7 @@ describe("subtasks done prompts (status roll-up)", () => {
 describe("attachments", () => {
   /** Like setup(), with a temporary uploads folder. */
   async function setupWithUploads() {
-    const db = openDatabase(":memory:");
+    const db = await freshDb();
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "rpit-uploads-"));
     const app = createApp(db, { uploadsDir: dir });
     const agent = request.agent(app);
@@ -1188,7 +1190,7 @@ describe("attachments", () => {
     expect(c.files()).toEqual([keep.id]);
     await c.agent.delete(`/api/projects/${c.projectId}`).expect(204);
     expect(c.files()).toEqual([]);
-    expect(c.db.prepare(`SELECT COUNT(*) AS n FROM attachments`).get()).toEqual({ n: 0 });
+    expect(await c.db.get(`SELECT COUNT(*) AS n FROM attachments`)).toEqual({ n: 0 });
   });
 
   it("sweeps orphaned files on startup", async () => {
@@ -1196,7 +1198,7 @@ describe("attachments", () => {
     const kept = (await upload(c, { name: "a" }, "a")).body;
     fs.writeFileSync(path.join(c.dir, "00000000-0000-4000-8000-000000000000"), "x");
     fs.writeFileSync(path.join(c.dir, "README"), "not ours");
-    expect(sweepOrphanUploads(c.db)).toBe(1);
+    expect(await sweepOrphanUploads(c.db)).toBe(1);
     expect(c.files().sort()).toEqual(["README", kept.id].sort());
   });
 });
@@ -1320,22 +1322,22 @@ describe("board columns (custom statuses)", () => {
     expect(inbox.map((n: { kind: string; taskId: string }) => `${n.kind} ${n.taskId}`)).toContain(`subtasks_done ${parent.id}`);
 
     await ctx.agent.delete(`/api/projects/${ctx.projectId}`).expect(204);
-    expect(ctx.db.prepare(`SELECT COUNT(*) AS n FROM board_columns`).get()).toEqual({ n: 0 });
+    expect(await ctx.db.get(`SELECT COUNT(*) AS n FROM board_columns`)).toEqual({ n: 0 });
   });
 });
 
-describe("migration 10 (board columns)", () => {
+describe.skipIf(!onSqlite)("migration 10 (board columns)", () => {
   it("gives existing projects the default columns and puts tasks in the one for their status", async () => {
     const { DatabaseSync } = await import("node:sqlite");
     const { migrations } = await import("../src/db/migrations.ts");
-    const { migrate } = await import("../src/db/index.ts");
+    const { migrate, fromSqlite } = await import("../src/db/index.ts");
     const db = new DatabaseSync(":memory:");
     db.exec("PRAGMA foreign_keys = ON");
     for (const m of migrations.slice(0, 9)) db.exec(m);
     db.exec("PRAGMA user_version = 9");
     db.exec(`INSERT INTO projects (id, name) VALUES ('p1', 'One'), ('p2', 'Two')`);
     db.exec(`INSERT INTO tasks (id, project_id, title, status) VALUES ('t1', 'p1', 'A', 'in_review'), ('t2', 'p2', 'B', 'done')`);
-    migrate(db);
+    await migrate(fromSqlite(db));
 
     const cols = db.prepare(`SELECT project_id, name, category FROM board_columns ORDER BY project_id, position`).all();
     expect(cols).toHaveLength(8);
@@ -1429,15 +1431,15 @@ describe("test runs (history)", () => {
   it("goes with its test case", async () => {
     const tc = await mkTest({ status: "passed" });
     await ctx.agent.delete(`/api/tests/${tc.id}`).expect(204);
-    expect(ctx.db.prepare(`SELECT COUNT(*) AS n FROM test_runs`).get()).toEqual({ n: 0 });
+    expect(await ctx.db.get(`SELECT COUNT(*) AS n FROM test_runs`)).toEqual({ n: 0 });
   });
 });
 
-describe("migration 11 (test runs)", () => {
+describe.skipIf(!onSqlite)("migration 11 (test runs)", () => {
   it("carries each existing result over as one run", async () => {
     const { DatabaseSync } = await import("node:sqlite");
     const { migrations } = await import("../src/db/migrations.ts");
-    const { migrate } = await import("../src/db/index.ts");
+    const { migrate, fromSqlite } = await import("../src/db/index.ts");
     const db = new DatabaseSync(":memory:");
     db.exec("PRAGMA foreign_keys = ON");
     for (const m of migrations.slice(0, 10)) db.exec(m);
@@ -1445,7 +1447,7 @@ describe("migration 11 (test runs)", () => {
     db.exec(`INSERT INTO projects (id, name) VALUES ('p', 'P')`);
     db.exec(`INSERT INTO test_cases (id, project_id, title, status, updated_at) VALUES
       ('a', 'p', 'A', 'failed', '2026-01-02T00:00:00.000Z'), ('b', 'p', 'B', 'not_run', '2026-01-03T00:00:00.000Z')`);
-    migrate(db);
+    await migrate(fromSqlite(db));
     expect(db.prepare(`SELECT test_case_id, status, run_by, created_at FROM test_runs`).all()).toEqual([
       { test_case_id: "a", status: "failed", run_by: null, created_at: "2026-01-02T00:00:00.000Z" },
     ]);
@@ -1536,7 +1538,7 @@ describe("test suites", () => {
     const s = await mkSuite({ name: "S" });
     await mkTest({ suiteId: s.id });
     await ctx.agent.delete(`/api/projects/${ctx.projectId}`).expect(204);
-    expect(ctx.db.prepare(`SELECT COUNT(*) AS n FROM test_suites`).get()).toEqual({ n: 0 });
+    expect(await ctx.db.get(`SELECT COUNT(*) AS n FROM test_suites`)).toEqual({ n: 0 });
   });
 });
 
@@ -1567,7 +1569,7 @@ describe("structured test steps", () => {
       .expect(200);
     expect(res.body.steps.map((s: { action: string }) => s.action)).toEqual(["Click **Save**", "Open the page"]);
     expect((await ctx.agent.patch(`/api/tests/${tc.id}`).send({ steps: [] }).expect(200)).body.steps).toEqual([]);
-    expect(ctx.db.prepare(`SELECT COUNT(*) AS n FROM test_steps`).get()).toEqual({ n: 0 });
+    expect(await ctx.db.get(`SELECT COUNT(*) AS n FROM test_steps`)).toEqual({ n: 0 });
   });
 
   it("rejects blank steps and too many", async () => {
@@ -1584,15 +1586,15 @@ describe("structured test steps", () => {
     expect(items).toHaveLength(2);
     expect(items[0].diff).toEqual({ steps: { from: "1. Open\n   Expected: Loads", to: "1. Open\n   Expected: Loads\n2. Close" } });
     await ctx.agent.delete(`/api/tests/${tc.id}`).expect(204);
-    expect(ctx.db.prepare(`SELECT COUNT(*) AS n FROM test_steps`).get()).toEqual({ n: 0 });
+    expect(await ctx.db.get(`SELECT COUNT(*) AS n FROM test_steps`)).toEqual({ n: 0 });
   });
 });
 
-describe("migration 13 (structured steps)", () => {
+describe.skipIf(!onSqlite)("migration 13 (structured steps)", () => {
   it("turns each test's old steps and expected text into one step, then drops the columns", async () => {
     const { DatabaseSync } = await import("node:sqlite");
     const { migrations } = await import("../src/db/migrations.ts");
-    const { migrate } = await import("../src/db/index.ts");
+    const { migrate, fromSqlite } = await import("../src/db/index.ts");
     const db = new DatabaseSync(":memory:");
     db.exec("PRAGMA foreign_keys = ON");
     for (const m of migrations.slice(0, 12)) db.exec(m);
@@ -1600,7 +1602,7 @@ describe("migration 13 (structured steps)", () => {
     db.exec(`INSERT INTO projects (id, name) VALUES ('p', 'P')`);
     db.exec(`INSERT INTO test_cases (id, project_id, title, steps, expected) VALUES
       ('a', 'p', 'A', '1. Open\n2. Click', ' Works '), ('b', 'p', 'B', '', 'Only expected'), ('c', 'p', 'C', '  ', '')`);
-    migrate(db);
+    await migrate(fromSqlite(db));
     expect(db.prepare(`SELECT test_case_id, position, action, expected FROM test_steps ORDER BY test_case_id`).all()).toEqual([
       { test_case_id: "a", position: 1, action: "1. Open\n2. Click", expected: "Works" },
       { test_case_id: "b", position: 1, action: "", expected: "Only expected" },
@@ -1779,7 +1781,31 @@ describe("home dashboard", () => {
   it("needs the viewer's date and a session", async () => {
     await ctx.agent.get("/api/dashboard").expect(400);
     await ctx.agent.get("/api/dashboard?today=tomorrow").expect(400);
-    const db = openDatabase(":memory:");
+    const db = await isolatedDb();
     await request(createApp(db)).get(`/api/dashboard?today=${today}`).expect(401);
+  });
+});
+
+describe.skipIf(onSqlite)("Postgres schema", () => {
+  it("has the same tables and columns as SQLite after all migrations", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const { migrations } = await import("../src/db/migrations.ts");
+    const raw = new DatabaseSync(":memory:");
+    for (const m of migrations) raw.exec(m);
+    const sqlite = new Map<string, string[]>();
+    for (const { name } of raw.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all() as { name: string }[]) {
+      sqlite.set(name, (raw.prepare(`PRAGMA table_info("${name}")`).all() as { name: string }[]).map((c) => c.name).sort());
+    }
+    const pg = new Map<string, string[]>();
+    const rows = await ctx.db.all<{ table_name: string; column_name: string }>(
+      `SELECT table_name, column_name FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name != 'schema_version'`,
+    );
+    for (const r of rows) pg.set(r.table_name, [...(pg.get(r.table_name) ?? []), r.column_name].sort());
+    // Postgres adds seq (insertion order) where SQLite uses its implicit rowid.
+    for (const [t, cols] of pg) pg.set(t, cols.filter((c) => c !== "seq"));
+    expect([...pg.keys()].sort()).toEqual([...sqlite.keys()].sort());
+    for (const [t, cols] of sqlite) expect([t, pg.get(t)]).toEqual([t, cols]);
+    expect(testDialect).toBe("postgres");
   });
 });

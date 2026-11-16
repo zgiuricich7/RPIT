@@ -7,7 +7,7 @@ import {
 } from "@rpit/shared";
 import type { DB } from "../db/index.ts";
 import { newId, transaction } from "../db/index.ts";
-import { ATTACHMENT_SELECT, getTask, toAttachment } from "../db/repo.ts";
+import { ATTACHMENT_SELECT, getTask, rowOrder, toAttachment } from "../db/repo.ts";
 import { HttpError, notFound, param, parseBody } from "../http.ts";
 import { currentUser } from "../auth.ts";
 import { byAttachment, requireProjectRole } from "../access.ts";
@@ -54,17 +54,18 @@ export function attachmentRoutes(db: DB) {
   const byId = Router();
   const can = requireProjectRole(db);
 
-  const get = (id: string) => {
-    const row = db.prepare(`${ATTACHMENT_SELECT} WHERE f.id = ?`).get(id) as Record<string, unknown> | undefined;
+  const get = async (id: string) => {
+    const row = await db.get(`${ATTACHMENT_SELECT} WHERE f.id = ?`, id);
     if (!row) throw notFound("Attachment");
     return toAttachment(row);
   };
 
   /** Every attachment in the project (project files, and those on its tasks and test cases), oldest first. */
-  byProject.get("/", can("viewer"), (req, res) => {
-    const rows = db
-      .prepare(`${ATTACHMENT_SELECT} WHERE f.project_id = ? ORDER BY f.created_at, f.rowid`)
-      .all(param(req, "projectId")) as Record<string, unknown>[];
+  byProject.get("/", can("viewer"), async (req, res) => {
+    const rows = await db.all(
+      `${ATTACHMENT_SELECT} WHERE f.project_id = ? ORDER BY f.created_at, ${rowOrder(db, "f")}`,
+      param(req, "projectId"),
+    );
     res.json(rows.map(toAttachment));
   });
 
@@ -76,7 +77,7 @@ export function attachmentRoutes(db: DB) {
     "/",
     can("editor"),
     express.raw({ type: () => true, limit: MAX_ATTACHMENT_BYTES }),
-    (req, res) => {
+    async (req, res) => {
       const projectId = param(req, "projectId");
       const actorId = currentUser(req).id;
       const q = parseBody(AttachmentUpload, req.query);
@@ -85,24 +86,21 @@ export function attachmentRoutes(db: DB) {
         throw new HttpError(415, "Send the file contents with Content-Type: application/octet-stream");
       }
       if (q.taskId) {
-        const t = getTask(db, q.taskId);
+        const t = await getTask(db, q.taskId);
         if (!t || t.projectId !== projectId) throw new HttpError(400, "Task must be in the same project");
       }
       if (q.testCaseId) {
-        const t = db.prepare(`SELECT project_id FROM test_cases WHERE id = ?`).get(q.testCaseId) as
-          | { project_id: string }
-          | undefined;
+        const t = await db.get<{ project_id: string }>(`SELECT project_id FROM test_cases WHERE id = ?`, q.testCaseId);
         if (t?.project_id !== projectId) throw new HttpError(400, "Test case must be in the same project");
       }
 
       const id = newId();
       saveAttachmentFile(db, id, req.body);
       try {
-        const created = transaction(db, () => {
-          db.prepare(
+        const created = await transaction(db, async () => {
+          await db.run(
             `INSERT INTO attachments (id, project_id, task_id, test_case_id, uploader_id, filename, content_type, size)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          ).run(
             id,
             projectId,
             q.taskId ?? null,
@@ -112,8 +110,13 @@ export function attachmentRoutes(db: DB) {
             cleanContentType(q.type),
             req.body.length,
           );
-          const f = get(id);
-          logActivity(db, { ...attachmentEntry(f), actorId, action: "created", diff: snapshot(f, ATTACHMENT_FIELDS, "created") });
+          const f = await get(id);
+          await logActivity(db, {
+            ...attachmentEntry(f),
+            actorId,
+            action: "created",
+            diff: snapshot(f, ATTACHMENT_FIELDS, "created"),
+          });
           return f;
         });
         res.status(201).json(created);
@@ -130,8 +133,8 @@ export function attachmentRoutes(db: DB) {
    * uploaded HTML, SVG or scripts never run in the app's origin. nosniff and a
    * sandboxing CSP back that up.
    */
-  byId.get("/:attachmentId/download", can("viewer", byAttachment), (req, res, next) => {
-    const f = get(param(req, "attachmentId"));
+  byId.get("/:attachmentId/download", can("viewer", byAttachment), async (req, res, next) => {
+    const f = await get(param(req, "attachmentId"));
     const inline =
       (INLINE_ATTACHMENT_TYPES as readonly string[]).includes(f.contentType) && req.query.download === undefined;
     res.sendFile(
@@ -152,12 +155,12 @@ export function attachmentRoutes(db: DB) {
   });
 
   /** Editors can delete any attachment in the project. */
-  byId.delete("/:attachmentId", can("editor", byAttachment), (req, res) => {
-    const f = get(param(req, "attachmentId"));
+  byId.delete("/:attachmentId", can("editor", byAttachment), async (req, res) => {
+    const f = await get(param(req, "attachmentId"));
     const actorId = currentUser(req).id;
-    transaction(db, () => {
-      logActivity(db, { ...attachmentEntry(f), actorId, action: "deleted", diff: snapshot(f, ATTACHMENT_FIELDS, "deleted") });
-      db.prepare(`DELETE FROM attachments WHERE id = ?`).run(f.id);
+    await transaction(db, async () => {
+      await logActivity(db, { ...attachmentEntry(f), actorId, action: "deleted", diff: snapshot(f, ATTACHMENT_FIELDS, "deleted") });
+      await db.run(`DELETE FROM attachments WHERE id = ?`, f.id);
       removeFilesAfterCommit(db, [f.id]);
     });
     res.status(204).end();

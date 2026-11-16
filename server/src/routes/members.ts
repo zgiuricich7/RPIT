@@ -13,52 +13,47 @@ export function memberRoutes(db: DB) {
   const r = Router({ mergeParams: true });
   const can = requireProjectRole(db);
 
-  const requireMember = (projectId: string, userId: string) => {
-    const m = getMember(db, projectId, userId);
+  const requireMember = async (projectId: string, userId: string) => {
+    const m = await getMember(db, projectId, userId);
     if (!m) throw notFound("Member");
     return m;
   };
-  const ownerCount = (projectId: string) =>
-    (
-      db.prepare(`SELECT COUNT(*) AS n FROM project_members WHERE project_id = ? AND role = 'owner'`).get(projectId) as {
-        n: number;
-      }
-    ).n;
+  const ownerCount = async (projectId: string) =>
+    Number(
+      (await db.get<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM project_members WHERE project_id = ? AND role = 'owner'`,
+        projectId,
+      ))!.n,
+    );
   /** Every project keeps at least one owner. */
-  const guardLastOwner = (projectId: string, current: ProjectRole, next: ProjectRole | null) => {
-    if (current === "owner" && next !== "owner" && ownerCount(projectId) <= 1) {
+  const guardLastOwner = async (projectId: string, current: ProjectRole, next: ProjectRole | null) => {
+    if (current === "owner" && next !== "owner" && (await ownerCount(projectId)) <= 1) {
       throw new HttpError(400, "A project needs at least one owner. Make someone else an owner first.");
     }
   };
 
-  r.get("/", can("viewer"), (req, res) => {
-    const rows = db
-      .prepare(`${MEMBER_SELECT} WHERE m.project_id = ? ORDER BY u.name`)
-      .all(param(req, "projectId")) as Record<string, unknown>[];
+  r.get("/", can("viewer"), async (req, res) => {
+    const rows = await db.all(`${MEMBER_SELECT} WHERE m.project_id = ? ORDER BY u.name`, param(req, "projectId"));
     res.json(rows.map(toMember));
   });
 
   /** Invite an existing account by email. */
-  r.post("/", can("owner"), (req, res) => {
+  r.post("/", can("owner"), async (req, res) => {
     const projectId = param(req, "projectId");
     const input = parseBody(MemberInput, req.body);
-    const user = db.prepare(`SELECT id FROM users WHERE email = ?`).get(input.email) as { id: string } | undefined;
+    const user = await db.get<{ id: string }>(`SELECT id FROM users WHERE email = ?`, input.email);
     if (!user) {
       const msg = "No account uses this email. Ask them to sign up first, then invite them.";
       throw new HttpError(400, msg, { email: [msg] });
     }
-    if (getMember(db, projectId, user.id)) {
+    if (await getMember(db, projectId, user.id)) {
       const msg = "This person is already a member of the project";
       throw new HttpError(409, msg, { email: [msg] });
     }
-    const member = transaction(db, () => {
-      db.prepare(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, ?)`).run(
-        projectId,
-        user.id,
-        input.role,
-      );
-      const m = requireMember(projectId, user.id);
-      logActivity(db, {
+    const member = await transaction(db, async () => {
+      await db.run(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, ?)`, projectId, user.id, input.role);
+      const m = await requireMember(projectId, user.id);
+      await logActivity(db, {
         projectId,
         actorId: currentUser(req).id,
         entity: "member",
@@ -72,15 +67,15 @@ export function memberRoutes(db: DB) {
     res.status(201).json(member);
   });
 
-  r.patch("/:userId", can("owner"), (req, res) => {
+  r.patch("/:userId", can("owner"), async (req, res) => {
     const projectId = param(req, "projectId");
     const userId = param(req, "userId");
-    const cur = requireMember(projectId, userId);
+    const cur = await requireMember(projectId, userId);
     const { role } = parseBody(MemberPatch, req.body);
-    guardLastOwner(projectId, cur.role, role);
-    transaction(db, () => {
-      db.prepare(`UPDATE project_members SET role = ? WHERE project_id = ? AND user_id = ?`).run(role, projectId, userId);
-      logActivity(db, {
+    await guardLastOwner(projectId, cur.role, role);
+    await transaction(db, async () => {
+      await db.run(`UPDATE project_members SET role = ? WHERE project_id = ? AND user_id = ?`, role, projectId, userId);
+      await logActivity(db, {
         projectId,
         actorId: currentUser(req).id,
         entity: "member",
@@ -90,22 +85,22 @@ export function memberRoutes(db: DB) {
         diff: role === cur.role ? {} : { role: { from: cur.role, to: role } },
       });
     });
-    res.json(requireMember(projectId, userId));
+    res.json(await requireMember(projectId, userId));
   });
 
   /** Owners can remove anyone; any member can remove themselves (leave). */
-  r.delete("/:userId", can("viewer"), (req, res) => {
+  r.delete("/:userId", can("viewer"), async (req, res) => {
     const projectId = param(req, "projectId");
     const userId = param(req, "userId");
     const actorId = currentUser(req).id;
     if (userId !== actorId && currentProject(req).role !== "owner") {
       throw new HttpError(403, "You need owner access to do this");
     }
-    const cur = requireMember(projectId, userId);
-    guardLastOwner(projectId, cur.role, null);
-    transaction(db, () => {
+    const cur = await requireMember(projectId, userId);
+    await guardLastOwner(projectId, cur.role, null);
+    await transaction(db, async () => {
       // Leaving is logged as a removal where the actor is the member.
-      logActivity(db, {
+      await logActivity(db, {
         projectId,
         actorId,
         entity: "member",
@@ -116,11 +111,13 @@ export function memberRoutes(db: DB) {
       });
       // Former members can't be assignees, so release (and log) their work in this project.
       for (const table of ["tasks", "test_cases"] as const) {
-        const rows = db
-          .prepare(`SELECT id, title FROM ${table} WHERE project_id = ? AND assignee_id = ?`)
-          .all(projectId, userId) as { id: string; title: string }[];
+        const rows = await db.all<{ id: string; title: string }>(
+          `SELECT id, title FROM ${table} WHERE project_id = ? AND assignee_id = ?`,
+          projectId,
+          userId,
+        );
         for (const row of rows) {
-          logActivity(db, {
+          await logActivity(db, {
             projectId,
             actorId,
             entity: table === "tasks" ? "task" : "test_case",
@@ -131,14 +128,11 @@ export function memberRoutes(db: DB) {
             diff: { assigneeId: { from: userId, to: null } },
           });
         }
-        db.prepare(`UPDATE ${table} SET assignee_id = NULL WHERE project_id = ? AND assignee_id = ?`).run(
-          projectId,
-          userId,
-        );
+        await db.run(`UPDATE ${table} SET assignee_id = NULL WHERE project_id = ? AND assignee_id = ?`, projectId, userId);
       }
       // Their inbox shouldn't keep links into a project they can no longer open.
-      db.prepare(`DELETE FROM notifications WHERE project_id = ? AND user_id = ?`).run(projectId, userId);
-      db.prepare(`DELETE FROM project_members WHERE project_id = ? AND user_id = ?`).run(projectId, userId);
+      await db.run(`DELETE FROM notifications WHERE project_id = ? AND user_id = ?`, projectId, userId);
+      await db.run(`DELETE FROM project_members WHERE project_id = ? AND user_id = ?`, projectId, userId);
     });
     res.status(204).end();
   });

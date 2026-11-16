@@ -11,33 +11,27 @@ export function authRoutes(db: DB) {
 
   r.post("/register", async (req, res) => {
     const input = parseBody(RegisterInput, req.body);
-    const exists = db.prepare(`SELECT 1 FROM users WHERE email = ?`).get(input.email);
+    const exists = await db.get(`SELECT 1 AS hit FROM users WHERE email = ?`, input.email);
     if (exists) throw new HttpError(409, "An account with this email already exists");
     const id = newId();
-    db.prepare(`INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)`).run(
-      id,
-      input.email,
-      input.name,
-      await hashPassword(input.password),
-    );
-    createSession(db, res, id);
+    const hash = await hashPassword(input.password);
+    await db.run(`INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)`, id, input.email, input.name, hash);
+    await createSession(db, res, id);
     res.status(201).json({ id, name: input.name, email: input.email });
   });
 
   r.post("/login", async (req, res) => {
     const input = parseBody(LoginInput, req.body);
-    const row = db.prepare(`SELECT * FROM users WHERE email = ?`).get(input.email) as
-      | Record<string, unknown>
-      | undefined;
+    const row = await db.get(`SELECT * FROM users WHERE email = ?`, input.email);
     if (!row || !(await verifyPassword(input.password, row.password_hash as string))) {
       throw new HttpError(401, "Email or password is incorrect");
     }
-    createSession(db, res, row.id as string);
+    await createSession(db, res, row.id as string);
     res.json(toUser(row));
   });
 
-  r.post("/logout", (req, res) => {
-    destroySession(db, req, res);
+  r.post("/logout", async (req, res) => {
+    await destroySession(db, req, res);
     res.status(204).end();
   });
 

@@ -111,7 +111,13 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
 
 ## 5. Platform
 
-5.1 **Postgres support** (keep SQL portable; consider Drizzle or Kysely as a query layer).
+5.1 ~~**Postgres support**~~ Done: a thin async database interface with SQLite (default) and Postgres adapters,
+    chosen by `DATABASE_URL` (`postgres://…` via `pg`, or `pglite:<folder>` for embedded Postgres). Queries stay
+    hand-written and portable, with small dialect helpers where SQL differs; transactions follow the async call
+    chain. Postgres has its own migration list (starting from the full current schema), and the whole API test
+    suite runs against both databases (Postgres via PGlite).
+    Follow-up: a SQLite → Postgres data copy tool, Postgres LISTEN/NOTIFY for real-time events across several
+    server processes (see 1.6), and running CI against a real Postgres server (5.7).
 5.2 **Rate limiting and CSRF hardening** (SameSite=Lax cookies are the current CSRF defence).
 5.3 **Password reset** and email verification.
 5.4 **OAuth sign-in** (Google, GitHub).

@@ -18,11 +18,11 @@ const dirs = new WeakMap<DB, string>();
 
 /** Set the uploads folder for this database (createApp does it). Created on first upload. */
 export function setUploadsDir(db: DB, dir: string) {
-  dirs.set(db, path.resolve(dir));
+  dirs.set(db.root, path.resolve(dir));
 }
 
 function uploadsDir(db: DB): string {
-  const dir = dirs.get(db);
+  const dir = dirs.get(db.root);
   if (!dir) throw new Error("Uploads folder not configured; call setUploadsDir first");
   return dir;
 }
@@ -42,7 +42,7 @@ export function saveAttachmentFile(db: DB, id: string, data: Buffer) {
 
 /** Delete files now, ignoring ones that are already gone. */
 export function removeFiles(db: DB, ids: Iterable<string>) {
-  if (!dirs.has(db)) return;
+  if (!dirs.has(db.root)) return;
   for (const id of ids) {
     try {
       fs.unlinkSync(attachmentPath(db, id));
@@ -58,15 +58,15 @@ export function removeFilesAfterCommit(db: DB, ids: string[]) {
 }
 
 /** Ids of the attachments matching `where` (SQL over the attachments table), for removeFilesAfterCommit. */
-export function attachmentIds(db: DB, where: string, params: string[]): string[] {
-  return (db.prepare(`SELECT id FROM attachments WHERE ${where}`).all(...params) as { id: string }[]).map((r) => r.id);
+export async function attachmentIds(db: DB, where: string, params: string[]): Promise<string[]> {
+  return (await db.all<{ id: string }>(`SELECT id FROM attachments WHERE ${where}`, ...params)).map((r) => r.id);
 }
 
 /** Remove files in the uploads folder that no attachment row refers to. Returns how many were removed. */
-export function sweepOrphanUploads(db: DB): number {
+export async function sweepOrphanUploads(db: DB): Promise<number> {
   const dir = uploadsDir(db);
   if (!fs.existsSync(dir)) return 0;
-  const known = new Set(attachmentIds(db, "1 = 1", []));
+  const known = new Set(await attachmentIds(db, "1 = 1", []));
   const orphans = fs.readdirSync(dir).filter((name) => ID.test(name) && !known.has(name));
   removeFiles(db, orphans);
   return orphans.length;

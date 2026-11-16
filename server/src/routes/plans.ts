@@ -9,14 +9,13 @@ import {
   type TestPlanDetail,
   type TestPlanItem,
 } from "@rpit/shared";
-import type { DB } from "../db/index.ts";
+import type { DB, Row } from "../db/index.ts";
 import { newId, now, transaction } from "../db/index.ts";
+import { rowOrder } from "../db/repo.ts";
 import { HttpError, notFound, param, parseBody } from "../http.ts";
 import { currentUser } from "../auth.ts";
 import { requireProjectRole, type ProjectResolver } from "../access.ts";
 import { changes, logActivity, PLAN_FIELDS, snapshot } from "../activity.ts";
-
-type Row = Record<string, unknown>;
 
 const byPlan: ProjectResolver = {
   param: "planId",
@@ -28,19 +27,18 @@ const byPlan: ProjectResolver = {
  * Each test in the plan with its result *in this plan*: the latest run
  * recorded with this plan id (not_run until there is one).
  */
-function planItems(db: DB, planId: string): TestPlanItem[] {
+async function planItems(db: DB, planId: string): Promise<TestPlanItem[]> {
   const latest = `FROM test_runs r WHERE r.plan_id = i.plan_id AND r.test_case_id = i.test_case_id
-                  ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`;
-  const rows = db
-    .prepare(
-      `SELECT i.test_case_id, i.added_at,
-         (SELECT r.status ${latest}) AS status,
-         (SELECT r.created_at ${latest}) AS last_run_at,
-         (SELECT u.name FROM users u WHERE u.id = (SELECT r.run_by ${latest})) AS last_run_by
-       FROM test_plan_items i JOIN test_cases tc ON tc.id = i.test_case_id
-       WHERE i.plan_id = ? ORDER BY tc.title COLLATE NOCASE, tc.id`,
-    )
-    .all(planId) as Row[];
+                  ORDER BY r.created_at DESC, ${rowOrder(db, "r")} DESC LIMIT 1`;
+  const rows = await db.all(
+    `SELECT i.test_case_id, i.added_at,
+       (SELECT r.status ${latest}) AS status,
+       (SELECT r.created_at ${latest}) AS last_run_at,
+       (SELECT u.name FROM users u WHERE u.id = (SELECT r.run_by ${latest})) AS last_run_by
+     FROM test_plan_items i JOIN test_cases tc ON tc.id = i.test_case_id
+     WHERE i.plan_id = ? ORDER BY lower(tc.title), tc.id`,
+    planId,
+  );
   return rows.map((r) => ({
     testCaseId: r.test_case_id as string,
     status: (r.status as TestPlanItem["status"] | null) ?? "not_run",
@@ -50,7 +48,7 @@ function planItems(db: DB, planId: string): TestPlanItem[] {
   }));
 }
 
-function toPlan(db: DB, r: Row, items = planItems(db, r.id as string)): TestPlan {
+async function toPlan(db: DB, r: Row, items?: TestPlanItem[]): Promise<TestPlan> {
   return {
     id: r.id as string,
     projectId: r.project_id as string,
@@ -58,20 +56,21 @@ function toPlan(db: DB, r: Row, items = planItems(db, r.id as string)): TestPlan
     description: r.description as string,
     dueDate: (r.due_date as string | null) ?? null,
     closedAt: (r.closed_at as string | null) ?? null,
-    progress: testStats(items),
+    progress: testStats(items ?? (await planItems(db, r.id as string))),
     createdAt: r.created_at as string,
     updatedAt: r.updated_at as string,
   };
 }
 
 /** Before recording a run in a plan: the plan must be this test's project's, open, and contain the test. */
-export function checkPlanRun(db: DB, t: Pick<TestCase, "id" | "projectId">, planId: string) {
-  const plan = db.prepare(`SELECT project_id, closed_at FROM test_plans WHERE id = ?`).get(planId) as
-    | { project_id: string; closed_at: string | null }
-    | undefined;
+export async function checkPlanRun(db: DB, t: Pick<TestCase, "id" | "projectId">, planId: string) {
+  const plan = await db.get<{ project_id: string; closed_at: string | null }>(
+    `SELECT project_id, closed_at FROM test_plans WHERE id = ?`,
+    planId,
+  );
   if (plan?.project_id !== t.projectId) throw new HttpError(400, "Test plan must be in the same project");
   if (plan.closed_at) throw new HttpError(400, "This test plan is closed; reopen it to record runs");
-  const inPlan = db.prepare(`SELECT 1 FROM test_plan_items WHERE plan_id = ? AND test_case_id = ?`).get(planId, t.id);
+  const inPlan = await db.get(`SELECT 1 AS hit FROM test_plan_items WHERE plan_id = ? AND test_case_id = ?`, planId, t.id);
   if (!inPlan) throw new HttpError(400, "This test case isn't in that test plan");
 }
 
@@ -87,14 +86,14 @@ export function planRoutes(db: DB) {
   const byId = Router();
   const can = requireProjectRole(db);
 
-  const row = (id: string) => {
-    const r = db.prepare(`SELECT * FROM test_plans WHERE id = ?`).get(id) as Row | undefined;
+  const row = async (id: string) => {
+    const r = await db.get(`SELECT * FROM test_plans WHERE id = ?`, id);
     if (!r) throw notFound("Test plan");
     return r;
   };
-  const detail = (id: string): TestPlanDetail => {
-    const items = planItems(db, id);
-    return { ...toPlan(db, row(id), items), items };
+  const detail = async (id: string): Promise<TestPlanDetail> => {
+    const items = await planItems(db, id);
+    return { ...(await toPlan(db, await row(id), items)), items };
   };
   const planEntry = (p: { id: string; projectId: string; name: string }) => ({
     projectId: p.projectId,
@@ -106,49 +105,62 @@ export function planRoutes(db: DB) {
     if (r.closed_at) throw new HttpError(400, "This test plan is closed; reopen it to change its tests");
   };
   /** Titles of the given tests in this project (ids not in the project are rejected). */
-  const testTitles = (projectId: string, ids: string[]) => {
+  const testTitles = async (projectId: string, ids: string[]) => {
     if (!ids.length) return [];
-    const rows = db
-      .prepare(`SELECT id, title FROM test_cases WHERE project_id = ? AND id IN (${ids.map(() => "?").join(",")})`)
-      .all(projectId, ...ids) as { id: string; title: string }[];
+    const rows = await db.all<{ id: string; title: string }>(
+      `SELECT id, title FROM test_cases WHERE project_id = ? AND id IN (${ids.map(() => "?").join(",")})`,
+      projectId,
+      ...ids,
+    );
     if (rows.length !== ids.length) throw new HttpError(400, "Test cases must be in the same project");
     return rows;
   };
   /** Adds tests not already in the plan; returns the titles of those added. */
-  const addTests = (planId: string, tests: { id: string; title: string }[]) => {
-    const add = db.prepare(`INSERT OR IGNORE INTO test_plan_items (plan_id, test_case_id, added_at) VALUES (?, ?, ?)`);
-    return tests.filter((t) => Number(add.run(planId, t.id, now()).changes) > 0).map((t) => t.title);
+  const addTests = async (planId: string, tests: { id: string; title: string }[]) => {
+    const added: string[] = [];
+    for (const t of tests) {
+      const r = await db.run(
+        `INSERT INTO test_plan_items (plan_id, test_case_id, added_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
+        planId,
+        t.id,
+        now(),
+      );
+      if (r.changes > 0) added.push(t.title);
+    }
+    return added;
   };
 
   /** Open plans first (by due date, then name), then closed ones (most recently closed first). */
-  byProject.get("/", can("viewer"), (req, res) => {
-    const rows = db
-      .prepare(
-        `SELECT * FROM test_plans WHERE project_id = ?
-         ORDER BY closed_at IS NOT NULL, CASE WHEN closed_at IS NULL THEN due_date IS NULL END, due_date,
-                  closed_at DESC, name COLLATE NOCASE`,
-      )
-      .all(param(req, "projectId")) as Row[];
-    res.json(rows.map((r) => toPlan(db, r)));
+  byProject.get("/", can("viewer"), async (req, res) => {
+    const rows = await db.all(
+      `SELECT * FROM test_plans WHERE project_id = ?
+       ORDER BY closed_at IS NOT NULL, CASE WHEN closed_at IS NULL THEN due_date IS NULL END, due_date,
+                closed_at DESC, lower(name)`,
+      param(req, "projectId"),
+    );
+    const plans: TestPlan[] = [];
+    for (const r of rows) plans.push(await toPlan(db, r));
+    res.json(plans);
   });
 
-  byProject.post("/", can("editor"), (req, res) => {
+  byProject.post("/", can("editor"), async (req, res) => {
     const projectId = param(req, "projectId");
     const actorId = currentUser(req).id;
     const input = parseBody(TestPlanInput, req.body);
-    const tests = testTitles(projectId, [...new Set(input.testCaseIds)]);
+    const tests = await testTitles(projectId, [...new Set(input.testCaseIds)]);
     const id = newId();
-    transaction(db, () => {
-      db.prepare(`INSERT INTO test_plans (id, project_id, name, description, due_date) VALUES (?, ?, ?, ?, ?)`).run(
+    await transaction(db, async () => {
+      await db.run(
+        `INSERT INTO test_plans (id, project_id, name, description, due_date) VALUES (?, ?, ?, ?, ?)`,
         id,
         projectId,
         input.name,
         input.description,
         input.dueDate,
       );
-      const added = addTests(id, tests);
-      const p = toPlan(db, row(id));
-      logActivity(db, {
+      const added = await addTests(id, tests);
+      const p = await toPlan(db, await row(id));
+      await logActivity(db, {
         ...planEntry(p),
         actorId,
         action: "created",
@@ -158,17 +170,17 @@ export function planRoutes(db: DB) {
         },
       });
     });
-    res.status(201).json(detail(id));
+    res.status(201).json(await detail(id));
   });
 
-  byId.get("/:planId", can("viewer", byPlan), (req, res) => {
-    res.json(detail(param(req, "planId")));
+  byId.get("/:planId", can("viewer", byPlan), async (req, res) => {
+    res.json(await detail(param(req, "planId")));
   });
 
-  byId.patch("/:planId", can("editor", byPlan), (req, res) => {
+  byId.patch("/:planId", can("editor", byPlan), async (req, res) => {
     const id = param(req, "planId");
     const actorId = currentUser(req).id;
-    const cur = toPlan(db, row(id));
+    const cur = await toPlan(db, await row(id));
     const p = parseBody(TestPlanPatch, req.body);
     const closedAt = p.closed === undefined ? cur.closedAt : p.closed ? (cur.closedAt ?? now()) : null;
     const next = {
@@ -177,37 +189,43 @@ export function planRoutes(db: DB) {
       dueDate: p.dueDate === undefined ? cur.dueDate : p.dueDate,
       closedAt,
     };
-    transaction(db, () => {
-      db.prepare(
+    await transaction(db, async () => {
+      await db.run(
         `UPDATE test_plans SET name = ?, description = ?, due_date = ?, closed_at = ?, updated_at = ? WHERE id = ?`,
-      ).run(next.name, next.description, next.dueDate, next.closedAt, now(), id);
-      logActivity(db, { ...planEntry({ ...cur, ...next }), actorId, action: "updated", diff: changes(cur, next, PLAN_FIELDS) });
+        next.name,
+        next.description,
+        next.dueDate,
+        next.closedAt,
+        now(),
+        id,
+      );
+      await logActivity(db, { ...planEntry({ ...cur, ...next }), actorId, action: "updated", diff: changes(cur, next, PLAN_FIELDS) });
     });
-    res.json(detail(id));
+    res.json(await detail(id));
   });
 
   /** Deletes the plan; runs recorded in it stay in each test's history. */
-  byId.delete("/:planId", can("editor", byPlan), (req, res) => {
-    const p = toPlan(db, row(param(req, "planId")));
+  byId.delete("/:planId", can("editor", byPlan), async (req, res) => {
+    const p = await toPlan(db, await row(param(req, "planId")));
     const actorId = currentUser(req).id;
-    transaction(db, () => {
-      logActivity(db, { ...planEntry(p), actorId, action: "deleted", diff: snapshot(p, PLAN_FIELDS, "deleted") });
-      db.prepare(`DELETE FROM test_plans WHERE id = ?`).run(p.id);
+    await transaction(db, async () => {
+      await logActivity(db, { ...planEntry(p), actorId, action: "deleted", diff: snapshot(p, PLAN_FIELDS, "deleted") });
+      await db.run(`DELETE FROM test_plans WHERE id = ?`, p.id);
     });
     res.status(204).end();
   });
 
-  byId.post("/:planId/tests", can("editor", byPlan), (req, res) => {
+  byId.post("/:planId/tests", can("editor", byPlan), async (req, res) => {
     const id = param(req, "planId");
-    const r = row(id);
+    const r = await row(id);
     requireOpen(r);
     const { testCaseIds } = parseBody(TestPlanTests, req.body);
-    const tests = testTitles(r.project_id as string, [...new Set(testCaseIds)]);
-    transaction(db, () => {
-      const added = addTests(id, tests);
+    const tests = await testTitles(r.project_id as string, [...new Set(testCaseIds)]);
+    await transaction(db, async () => {
+      const added = await addTests(id, tests);
       if (added.length) {
-        db.prepare(`UPDATE test_plans SET updated_at = ? WHERE id = ?`).run(now(), id);
-        logActivity(db, {
+        await db.run(`UPDATE test_plans SET updated_at = ? WHERE id = ?`, now(), id);
+        await logActivity(db, {
           ...planEntry({ id, projectId: r.project_id as string, name: r.name as string }),
           actorId: currentUser(req).id,
           action: "updated",
@@ -215,33 +233,33 @@ export function planRoutes(db: DB) {
         });
       }
     });
-    res.json(detail(id));
+    res.json(await detail(id));
   });
 
   /** Takes a test out of the plan. Its runs in the plan stay in the test's history. */
-  byId.delete("/:planId/tests/:testId", can("editor", byPlan), (req, res) => {
+  byId.delete("/:planId/tests/:testId", can("editor", byPlan), async (req, res) => {
     const id = param(req, "planId");
-    const r = row(id);
+    const r = await row(id);
     requireOpen(r);
     const testId = param(req, "testId");
-    const t = db
-      .prepare(
-        `SELECT tc.title FROM test_plan_items i JOIN test_cases tc ON tc.id = i.test_case_id
-         WHERE i.plan_id = ? AND i.test_case_id = ?`,
-      )
-      .get(id, testId) as { title: string } | undefined;
+    const t = await db.get<{ title: string }>(
+      `SELECT tc.title FROM test_plan_items i JOIN test_cases tc ON tc.id = i.test_case_id
+       WHERE i.plan_id = ? AND i.test_case_id = ?`,
+      id,
+      testId,
+    );
     if (!t) throw notFound("Test case in this plan");
-    transaction(db, () => {
-      db.prepare(`DELETE FROM test_plan_items WHERE plan_id = ? AND test_case_id = ?`).run(id, testId);
-      db.prepare(`UPDATE test_plans SET updated_at = ? WHERE id = ?`).run(now(), id);
-      logActivity(db, {
+    await transaction(db, async () => {
+      await db.run(`DELETE FROM test_plan_items WHERE plan_id = ? AND test_case_id = ?`, id, testId);
+      await db.run(`UPDATE test_plans SET updated_at = ? WHERE id = ?`, now(), id);
+      await logActivity(db, {
         ...planEntry({ id, projectId: r.project_id as string, name: r.name as string }),
         actorId: currentUser(req).id,
         action: "updated",
         diff: { testsRemoved: { from: t.title, to: null } },
       });
     });
-    res.json(detail(id));
+    res.json(await detail(id));
   });
 
   return { byProject, byId };

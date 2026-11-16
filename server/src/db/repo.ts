@@ -18,14 +18,45 @@ import type {
   User,
 } from "@rpit/shared";
 import { TASK_STATUSES, TEST_STATUSES, leafProgress } from "@rpit/shared";
-import type { DB } from "./index.ts";
+import type { DB, Row } from "./index.ts";
 
 /**
- * Row mappers: SQLite uses snake_case, the API uses camelCase.
+ * Row mappers: the database uses snake_case, the API uses camelCase.
  * Keep all SQL-to-API translation in this file.
  */
 
-type Row = Record<string, unknown>;
+// ---------- Dialect helpers (the few places SQLite and Postgres SQL differ) ----------
+
+/** A JSON array of `value` over the rows of `from`, ordered by `order`; an empty array when there are none. */
+export const jsonArray = (db: DB, value: string, from: string, order: string) =>
+  db.dialect === "postgres"
+    ? `(SELECT COALESCE(json_agg(${value} ORDER BY ${order}), '[]'::json) FROM ${from})`
+    : `(SELECT json_group_array(${value} ORDER BY ${order}) FROM ${from})`;
+
+/** A JSON object from `{ key: sqlExpression }`. */
+export const jsonObject = (db: DB, fields: Record<string, string>) =>
+  `${db.dialect === "postgres" ? "json_build_object" : "json_object"}(${Object.entries(fields)
+    .map(([k, v]) => `'${k}', ${v}`)
+    .join(", ")})`;
+
+/** Text at a path in a JSON text column, e.g. jsonText(db, "a.diff", "testCaseId", "to"). */
+export const jsonText = (db: DB, column: string, ...path: string[]) =>
+  db.dialect === "postgres"
+    ? `(${column}::json #>> '{${path.join(",")}}')`
+    : `json_extract(${column}, '$.${path.join(".")}')`;
+
+/**
+ * Insertion order, for tie-breaks and cursors: SQLite's implicit rowid, or the
+ * `seq` column the Postgres schema adds to activity, notifications, test_runs
+ * and attachments.
+ */
+export const rowOrder = (db: DB, alias: string) => `${alias}.${db.dialect === "postgres" ? "seq" : "rowid"}`;
+
+/** A JSON value from the database: Postgres drivers parse json results, SQLite returns text. */
+const parseJson = <T>(v: unknown, fallback: T): T =>
+  v == null ? fallback : typeof v === "string" ? (JSON.parse(v) as T) : (v as T);
+
+// ---------- Mappers ----------
 
 export const toUser = (r: Row): User => ({
   id: r.id as string,
@@ -66,8 +97,8 @@ export const toTask = (r: Row): Task => ({
   startDate: (r.start_date as string | null) ?? null,
   dueDate: (r.due_date as string | null) ?? null,
   remindAssignee: Boolean(r.remind_assignee),
-  labelIds: r.label_ids ? (JSON.parse(r.label_ids as string) as string[]) : [],
-  position: r.position as number,
+  labelIds: parseJson<string[]>(r.label_ids, []),
+  position: Number(r.position),
   commentCount: Number(r.comment_count ?? 0),
   createdAt: r.created_at as string,
   updatedAt: r.updated_at as string,
@@ -104,7 +135,7 @@ export const toComment = (r: Row): Comment => ({
   authorId: r.author_id as string,
   authorName: r.author_name as string,
   body: r.body as string,
-  mentions: r.mentions_json ? (JSON.parse(r.mentions_json as string) as CommentMention[]) : [],
+  mentions: parseJson<CommentMention[]>(r.mentions_json, []),
   createdAt: r.created_at as string,
   editedAt: (r.edited_at as string | null) ?? null,
 });
@@ -123,9 +154,9 @@ export const toActivity = (r: Row): Activity => ({
   createdAt: r.created_at as string,
 });
 
-/** Activity with the actor's name. Also selects rowid, which is the pagination cursor. */
-export const ACTIVITY_SELECT = `
-  SELECT a.rowid AS seq, a.*, u.name AS actor_name
+/** Activity with the actor's name, and `page_cursor` (insertion order) for pagination. */
+export const activitySelect = (db: DB) => `
+  SELECT ${rowOrder(db, "a")} AS page_cursor, a.*, u.name AS actor_name
   FROM activity a LEFT JOIN users u ON u.id = a.actor_id`;
 
 export const toNotification = (r: Row): Notification => ({
@@ -155,7 +186,7 @@ export const toTestCase = (r: Row): TestCase => ({
   status: r.status as TestCase["status"],
   priority: r.priority as TestCase["priority"],
   assigneeId: (r.assignee_id as string | null) ?? null,
-  steps: r.steps_json ? (JSON.parse(r.steps_json as string) as TestCase["steps"]) : [],
+  steps: parseJson<TestCase["steps"]>(r.steps_json, []),
   notes: r.notes as string,
   lastRunAt: (r.last_run_at as string | null) ?? null,
   runCount: Number(r.run_count ?? 0),
@@ -164,10 +195,9 @@ export const toTestCase = (r: Row): TestCase => ({
 });
 
 /** Test cases with their steps (JSON, in order), when they were last run and how often; alias test_cases as tc. */
-export const TEST_SELECT = `
+export const testSelect = (db: DB) => `
   SELECT tc.*,
-    (SELECT json_group_array(json_object('action', action, 'expected', expected)) FROM (
-       SELECT s.action, s.expected FROM test_steps s WHERE s.test_case_id = tc.id ORDER BY s.position)) AS steps_json,
+    ${jsonArray(db, jsonObject(db, { action: "s.action", expected: "s.expected" }), "test_steps s WHERE s.test_case_id = tc.id", "s.position")} AS steps_json,
     (SELECT MAX(r.created_at) FROM test_runs r WHERE r.test_case_id = tc.id) AS last_run_at,
     (SELECT COUNT(*) FROM test_runs r WHERE r.test_case_id = tc.id) AS run_count
   FROM test_cases tc`;
@@ -194,27 +224,23 @@ export const toTestRun = (r: Row): TestRun => ({
   createdAt: r.created_at as string,
 });
 
-/** Runs with the runner's and plan's names, newest first when ordered by `r.created_at DESC, r.rowid DESC`. */
+/** Runs with the runner's and plan's names; order newest first with `r.created_at DESC, rowOrder(db, "r") DESC`. */
 export const TEST_RUN_SELECT = `
   SELECT r.*, u.name AS run_by_name, p.name AS plan_name
   FROM test_runs r LEFT JOIN users u ON u.id = r.run_by LEFT JOIN test_plans p ON p.id = r.plan_id`;
 
 /** Tasks with their comment count and label ids (as JSON, in label name order). */
-export const TASK_SELECT = `
+export const taskSelect = (db: DB) => `
   SELECT t.*, (SELECT COUNT(*) FROM comments c WHERE c.task_id = t.id) AS comment_count,
-    (SELECT json_group_array(label_id) FROM (
-       SELECT tl.label_id FROM task_labels tl JOIN labels l ON l.id = tl.label_id
-       WHERE tl.task_id = t.id ORDER BY l.name COLLATE NOCASE, l.id)) AS label_ids
+    ${jsonArray(db, "tl.label_id", "task_labels tl JOIN labels l ON l.id = tl.label_id WHERE tl.task_id = t.id", "lower(l.name), l.id")} AS label_ids
   FROM tasks t`;
 
 /** Comment columns plus author name and mentions (as JSON); alias comments as c and the author as u. */
-const COMMENT_COLUMNS = `c.*, u.name AS author_name,
-  (SELECT json_group_array(json_object('userId', mu.id, 'name', mu.name))
-   FROM comment_mentions cm JOIN users mu ON mu.id = cm.user_id
-   WHERE cm.comment_id = c.id) AS mentions_json`;
+const commentColumns = (db: DB) => `c.*, u.name AS author_name,
+  ${jsonArray(db, jsonObject(db, { userId: "mu.id", name: "mu.name" }), "comment_mentions cm JOIN users mu ON mu.id = cm.user_id WHERE cm.comment_id = c.id", "mu.name")} AS mentions_json`;
 
-export const COMMENT_SELECT = `
-  SELECT ${COMMENT_COLUMNS}
+export const commentSelect = (db: DB) => `
+  SELECT ${commentColumns(db)}
   FROM comments c JOIN users u ON u.id = c.author_id`;
 
 /**
@@ -242,22 +268,24 @@ export const MEMBER_SELECT = `
   SELECT m.*, u.name, u.email
   FROM project_members m JOIN users u ON u.id = m.user_id`;
 
-export function getProjectForUser(db: DB, projectId: string, userId: string): Project | undefined {
-  const row = db.prepare(`${PROJECT_SELECT} WHERE p.id = ?`).get(userId, projectId) as Row | undefined;
+// ---------- Shared queries ----------
+
+export async function getProjectForUser(db: DB, projectId: string, userId: string): Promise<Project | undefined> {
+  const row = await db.get(`${PROJECT_SELECT} WHERE p.id = ?`, userId, projectId);
   return row && toProject(row);
 }
 
-export function getMemberRole(db: DB, projectId: string, userId: string): ProjectRole | undefined {
-  const row = db
-    .prepare(`SELECT role FROM project_members WHERE project_id = ? AND user_id = ?`)
-    .get(projectId, userId) as { role: ProjectRole } | undefined;
+export async function getMemberRole(db: DB, projectId: string, userId: string): Promise<ProjectRole | undefined> {
+  const row = await db.get<{ role: ProjectRole }>(
+    `SELECT role FROM project_members WHERE project_id = ? AND user_id = ?`,
+    projectId,
+    userId,
+  );
   return row?.role;
 }
 
-export function getMember(db: DB, projectId: string, userId: string): Member | undefined {
-  const row = db.prepare(`${MEMBER_SELECT} WHERE m.project_id = ? AND m.user_id = ?`).get(projectId, userId) as
-    | Row
-    | undefined;
+export async function getMember(db: DB, projectId: string, userId: string): Promise<Member | undefined> {
+  const row = await db.get(`${MEMBER_SELECT} WHERE m.project_id = ? AND m.user_id = ?`, projectId, userId);
   return row && toMember(row);
 }
 
@@ -266,60 +294,54 @@ export const toColumn = (r: Row): BoardColumn => ({
   projectId: r.project_id as string,
   name: r.name as string,
   category: r.category as BoardColumn["category"],
-  position: r.position as number,
+  position: Number(r.position),
 });
 
 /** The project's board columns, left to right. */
-export function listColumns(db: DB, projectId: string): BoardColumn[] {
-  return (
-    db.prepare(`SELECT * FROM board_columns WHERE project_id = ? ORDER BY position, created_at, id`).all(projectId) as Row[]
-  ).map(toColumn);
+export async function listColumns(db: DB, projectId: string): Promise<BoardColumn[]> {
+  return (await db.all(`SELECT * FROM board_columns WHERE project_id = ? ORDER BY position, created_at, id`, projectId)).map(
+    toColumn,
+  );
 }
 
-export function getColumn(db: DB, id: string): BoardColumn | undefined {
-  const row = db.prepare(`SELECT * FROM board_columns WHERE id = ?`).get(id) as Row | undefined;
+export async function getColumn(db: DB, id: string): Promise<BoardColumn | undefined> {
+  const row = await db.get(`SELECT * FROM board_columns WHERE id = ?`, id);
   return row && toColumn(row);
 }
 
-export function listLabels(db: DB, projectId: string): Label[] {
-  return (
-    db.prepare(`SELECT * FROM labels WHERE project_id = ? ORDER BY name COLLATE NOCASE, id`).all(projectId) as Row[]
-  ).map(toLabel);
+export async function listLabels(db: DB, projectId: string): Promise<Label[]> {
+  return (await db.all(`SELECT * FROM labels WHERE project_id = ? ORDER BY lower(name), id`, projectId)).map(toLabel);
 }
 
-export function getTask(db: DB, id: string): Task | undefined {
-  const row = db.prepare(`${TASK_SELECT} WHERE t.id = ?`).get(id) as Row | undefined;
+export async function getTask(db: DB, id: string): Promise<Task | undefined> {
+  const row = await db.get(`${taskSelect(db)} WHERE t.id = ?`, id);
   return row && toTask(row);
 }
 
-export function listTasks(db: DB, projectId: string): Task[] {
-  return (
-    db
-      // Positions can tie (they're a rank, not unique): id makes the order deterministic, matching renumber().
-      .prepare(`${TASK_SELECT} WHERE t.project_id = ? ORDER BY t.position, t.created_at, t.id`)
-      .all(projectId) as Row[]
-  ).map(toTask);
+export async function listTasks(db: DB, projectId: string): Promise<Task[]> {
+  // Positions can tie (they're a rank, not unique): id makes the order deterministic, matching renumber().
+  return (await db.all(`${taskSelect(db)} WHERE t.project_id = ? ORDER BY t.position, t.created_at, t.id`, projectId)).map(
+    toTask,
+  );
 }
 
 /** True when `candidateParentId` is `taskId` itself or one of its descendants. */
-export function wouldCreateCycle(db: DB, taskId: string, candidateParentId: string): boolean {
-  const row = db
-    .prepare(
-      `WITH RECURSIVE sub(id) AS (
-         SELECT ? UNION ALL SELECT t.id FROM tasks t JOIN sub ON t.parent_id = sub.id
-       )
-       SELECT 1 AS hit FROM sub WHERE id = ? LIMIT 1`,
-    )
-    .get(taskId, candidateParentId);
+export async function wouldCreateCycle(db: DB, taskId: string, candidateParentId: string): Promise<boolean> {
+  const row = await db.get(
+    `WITH RECURSIVE sub(id) AS (
+       SELECT CAST(? AS TEXT) UNION ALL SELECT t.id FROM tasks t JOIN sub ON t.parent_id = sub.id
+     )
+     SELECT 1 AS hit FROM sub WHERE id = ? LIMIT 1`,
+    taskId,
+    candidateParentId,
+  );
   return Boolean(row);
 }
 
-export function projectSummary(db: DB, projectId: string): ProjectSummary {
-  const tasks = listTasks(db, projectId);
+export async function projectSummary(db: DB, projectId: string): Promise<ProjectSummary> {
+  const tasks = await listTasks(db, projectId);
   const tests = (
-    db.prepare(`SELECT status FROM test_cases WHERE project_id = ?`).all(projectId) as {
-      status: TestCase["status"];
-    }[]
+    await db.all<{ status: TestCase["status"] }>(`SELECT status FROM test_cases WHERE project_id = ?`, projectId)
   ).map((r) => r.status);
 
   const tasksByStatus = Object.fromEntries(TASK_STATUSES.map((s) => [s, 0])) as ProjectSummary["tasksByStatus"];
@@ -346,17 +368,16 @@ export function projectSummary(db: DB, projectId: string): ProjectSummary {
   };
 }
 
-export function recentComments(db: DB, projectId: string, limit = 5): RecentComment[] {
-  return (
-    db
-      .prepare(
-        `SELECT ${COMMENT_COLUMNS}, t.title AS task_title
-         FROM comments c
-         JOIN users u ON u.id = c.author_id
-         JOIN tasks t ON t.id = c.task_id
-         WHERE t.project_id = ?
-         ORDER BY c.created_at DESC LIMIT ?`,
-      )
-      .all(projectId, limit) as Row[]
-  ).map((r) => ({ ...toComment(r), taskTitle: r.task_title as string }));
+export async function recentComments(db: DB, projectId: string, limit = 5): Promise<RecentComment[]> {
+  const rows = await db.all(
+    `SELECT ${commentColumns(db)}, t.title AS task_title
+     FROM comments c
+     JOIN users u ON u.id = c.author_id
+     JOIN tasks t ON t.id = c.task_id
+     WHERE t.project_id = ?
+     ORDER BY c.created_at DESC LIMIT ?`,
+    projectId,
+    limit,
+  );
+  return rows.map((r) => ({ ...toComment(r), taskTitle: r.task_title as string }));
 }

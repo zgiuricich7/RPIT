@@ -3,7 +3,8 @@ import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.ts";
-import { afterCommit, openDatabase, transaction } from "../src/db/index.ts";
+import { afterCommit, transaction, type DB } from "../src/db/index.ts";
+import { freshDb } from "./db.ts";
 import { eventHub } from "../src/events.ts";
 
 /**
@@ -29,7 +30,7 @@ afterEach(async () => {
 });
 
 async function start() {
-  const db = openDatabase(":memory:");
+  const db = await freshDb();
   server = createApp(db).listen(0);
   await once(server, "listening");
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
@@ -91,27 +92,54 @@ async function start() {
 }
 
 /** Wait until the hub has `n` listeners, since the stream is subscribed asynchronously. */
-async function waitForSubscribers(db: ReturnType<typeof openDatabase>, projectId: string, n: number) {
+async function waitForSubscribers(db: DB, projectId: string, n: number) {
   for (let i = 0; i < 100 && eventHub(db).subscriberCount(projectId) < n; i++) await new Promise((r) => setTimeout(r, 5));
   expect(eventHub(db).subscriberCount(projectId)).toBe(n);
 }
 
 describe("afterCommit", () => {
-  it("runs callbacks only after a successful commit", () => {
-    const db = openDatabase(":memory:");
+  it("runs callbacks only after a successful commit", async () => {
+    const db = await freshDb();
     const ran: string[] = [];
-    transaction(db, () => {
+    await transaction(db, async () => {
       afterCommit(db, () => ran.push("committed"));
       expect(ran).toEqual([]);
     });
-    expect(() =>
-      transaction(db, () => {
+    await expect(
+      transaction(db, async () => {
         afterCommit(db, () => ran.push("rolled back"));
         throw new Error("boom");
       }),
-    ).toThrow("boom");
+    ).rejects.toThrow("boom");
     afterCommit(db, () => ran.push("no transaction"));
     expect(ran).toEqual(["committed", "no transaction"]);
+  });
+
+  it("sends queries made through the root database inside a transaction to that transaction", async () => {
+    const db = await freshDb();
+    await db.run(`INSERT INTO users (id, email, name, password_hash) VALUES ('u1', 'a@x', 'A', 'h')`);
+    // Inside the transaction, the root handle sees the uncommitted row (and doesn't deadlock on SQLite).
+    await expect(
+      transaction(db, async () => {
+        await db.run(`UPDATE users SET name = 'B' WHERE id = 'u1'`);
+        expect(await db.get(`SELECT name FROM users WHERE id = 'u1'`)).toEqual({ name: "B" });
+        throw new Error("undo");
+      }),
+    ).rejects.toThrow("undo");
+    expect(await db.get(`SELECT name FROM users WHERE id = 'u1'`)).toEqual({ name: "A" });
+    // A concurrent caller outside the transaction doesn't see its writes before commit.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const tx = transaction(db, async () => {
+      await db.run(`UPDATE users SET name = 'C' WHERE id = 'u1'`);
+      await gate;
+    });
+    const outside = db.get(`SELECT name FROM users WHERE id = 'u1'`);
+    release();
+    await tx;
+    // SQLite queues the outside read until the commit; Postgres reads the committed value at the time.
+    expect(["A", "C"]).toContain(((await outside) as { name: string }).name);
+    expect(await db.get(`SELECT name FROM users WHERE id = 'u1'`)).toEqual({ name: "C" });
   });
 });
 
