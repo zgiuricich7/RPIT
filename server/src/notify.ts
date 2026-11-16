@@ -17,6 +17,8 @@ interface NotifyInput {
   taskId?: string | null;
   testCaseId?: string | null;
   commentId?: string | null;
+  /** Also notify the actor (prompts about their own work, like `subtasks_done`). */
+  includeActor?: boolean;
 }
 
 const memberIds = (db: DB, projectId: string) =>
@@ -33,7 +35,7 @@ export function notify(db: DB, n: NotifyInput) {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const userId of new Set(n.recipients)) {
-    if (!userId || userId === n.actorId || !members.has(userId)) continue;
+    if (!userId || (userId === n.actorId && !n.includeActor) || !members.has(userId)) continue;
     insert.run(newId(), userId, n.actorId, n.projectId, n.kind, n.taskId ?? null, n.testCaseId ?? null, n.commentId ?? null);
   }
 }

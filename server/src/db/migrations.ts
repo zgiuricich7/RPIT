@@ -237,4 +237,32 @@ export const migrations: string[] = [
   BEFORE DELETE ON activity
   BEGIN SELECT RAISE(ABORT, 'activity log is append-only'); END;
   `,
+
+  /* 8: prompt a parent task's assignee when all its subtasks are done */ `
+  ALTER TABLE projects ADD COLUMN notify_subtasks_done INTEGER NOT NULL DEFAULT 1
+    CHECK (notify_subtasks_done IN (0, 1));
+
+  -- Recreate notifications to widen the kind CHECK with 'subtasks_done'. Copy rowid: it orders same-time rows.
+  CREATE TABLE notifications_new (
+    id           TEXT PRIMARY KEY,
+    user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    actor_id     TEXT REFERENCES users(id) ON DELETE SET NULL,
+    project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    kind         TEXT NOT NULL CHECK (kind IN ('task_assigned','test_assigned','mention','reply',
+                                               'task_starts','task_due_soon','task_due','subtasks_done')),
+    task_id      TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+    test_case_id TEXT REFERENCES test_cases(id) ON DELETE CASCADE,
+    comment_id   TEXT REFERENCES comments(id) ON DELETE CASCADE,
+    read_at      TEXT,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  INSERT INTO notifications_new (rowid, id, user_id, actor_id, project_id, kind, task_id, test_case_id, comment_id,
+    read_at, created_at)
+    SELECT rowid, id, user_id, actor_id, project_id, kind, task_id, test_case_id, comment_id, read_at, created_at
+    FROM notifications;
+  DROP TABLE notifications;
+  ALTER TABLE notifications_new RENAME TO notifications;
+  CREATE INDEX idx_notifications_user ON notifications(user_id, created_at);
+  CREATE INDEX idx_notifications_task ON notifications(task_id, kind);
+  `,
 ];

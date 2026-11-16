@@ -38,6 +38,7 @@ const FIELD_LABELS: Record<string, string> = {
   dueDate: "Due date",
   remindAssignee: "Reminders",
   labels: "Labels",
+  notifySubtasksDone: "Prompt when subtasks are done",
   color: "Colour",
   taskId: "Linked task",
   steps: "Steps",
@@ -60,7 +61,7 @@ function formatValue(a: Activity, field: string, v: FieldChange["from"], l: Look
   if (field === "parentId") return v ? (l.tasks.find((t) => t.id === v)?.title ?? "a deleted task") : "Top level";
   if (field === "taskId") return v ? (l.tasks.find((t) => t.id === v)?.title ?? "a deleted task") : "None";
   if (field === "startDate" || field === "dueDate") return v ? formatDate(String(v)) : "None";
-  if (field === "remindAssignee") return v ? "On" : "Off";
+  if (field === "remindAssignee" || field === "notifySubtasksDone") return v ? "On" : "Off";
   if (field === "labels") return v ? String(v) : "None";
   if (field === "color") return LABEL_COLOR_LABELS[v as LabelColor] ?? String(v);
   if (v === null || v === "") return "empty";

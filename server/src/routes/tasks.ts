@@ -20,6 +20,7 @@ import { auditedTask, changes, logActivity, snapshot, TASK_FIELDS } from "../act
 import { publishEvent } from "../events.ts";
 import { activityPage } from "./activity.ts";
 import { checkLabels, setTaskLabels } from "./labels.ts";
+import { syncSubtasksDone } from "../rollup.ts";
 
 /** Assignees must be members of the project. */
 export function checkAssignee(db: DB, projectId: string, assigneeId: string | null | undefined) {
@@ -107,6 +108,7 @@ export function taskRoutes(db: DB) {
       const t = requireTask(id);
       logActivity(db, { ...taskEntry(t), actorId, action: "created", diff: snapshot(auditedTask(db, t), TASK_FIELDS, "created") });
       notifyAssignment(db, { kind: "task_assigned", actorId, projectId, id }, null, input.assigneeId);
+      syncSubtasksDone(db, [input.parentId], actorId);
       return t;
     });
     res.status(201).json(task);
@@ -168,6 +170,7 @@ export function taskRoutes(db: DB) {
         cur.assigneeId,
         merged.assigneeId,
       );
+      syncSubtasksDone(db, [id, cur.parentId, merged.parentId], actorId);
       return t;
     });
     res.json(task);
@@ -228,6 +231,7 @@ export function taskRoutes(db: DB) {
       } else if (t.position !== cur.position) {
         publishEvent(db, { projectId: t.projectId, actorId, entity: "task", entityId: id, taskId: id, action: "updated" });
       }
+      syncSubtasksDone(db, [id, cur.parentId, parentId], actorId);
       return t;
     });
     res.json(task);
@@ -273,6 +277,8 @@ export function taskRoutes(db: DB) {
         });
       }
       db.prepare(`DELETE FROM tasks WHERE id = ?`).run(id); // cascades to subtasks + comments, unlinks tests
+      // Deleting an open subtask can leave the parent's remaining subtasks all done.
+      syncSubtasksDone(db, [root.parentId], actorId);
     });
     res.status(204).end();
   });

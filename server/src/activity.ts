@@ -45,7 +45,7 @@ export const TASK_FIELDS = [
   "labels",
 ] as const;
 export const TEST_FIELDS = ["title", "status", "priority", "assigneeId", "taskId", "steps", "expected", "notes"] as const;
-export const PROJECT_FIELDS = ["name", "description"] as const;
+export const PROJECT_FIELDS = ["name", "description", "notifySubtasksDone"] as const;
 export const LABEL_FIELDS = ["name", "color"] as const;
 
 const norm = (v: unknown): Value => (v === undefined ? null : (v as Value));

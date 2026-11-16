@@ -86,13 +86,18 @@ export type LoginInput = z.infer<typeof LoginInput>;
 export const ProjectInput = z.object({
   name: z.string().trim().min(1, "Name is required").max(120),
   description: longText.default(""),
+  notifySubtasksDone: z.boolean().default(true),
 });
 /**
  * Patch schemas must not carry defaults: zod still applies `.default()` inside
  * `.partial()`, which would silently reset every field the client left out.
  */
 export const ProjectPatch = z
-  .object({ name: z.string().trim().min(1, "Name is required").max(120), description: longText })
+  .object({
+    name: z.string().trim().min(1, "Name is required").max(120),
+    description: longText,
+    notifySubtasksDone: z.boolean(),
+  })
   .partial();
 export type ProjectInput = z.input<typeof ProjectInput>;
 export type ProjectPatch = z.infer<typeof ProjectPatch>;
@@ -193,6 +198,8 @@ export type CommentPatch = z.infer<typeof CommentPatch>;
 /**
  * `task_starts` / `task_due_soon` (the day before) / `task_due` are reminders for
  * tasks with `remindAssignee` on; they have no actor (sent by the server).
+ * `subtasks_done` asks a parent task's assignee to mark it done now that all its
+ * subtasks are (the actor finished the last one; it's sent to them too).
  */
 export const NOTIFICATION_KINDS = [
   "task_assigned",
@@ -202,6 +209,7 @@ export const NOTIFICATION_KINDS = [
   "task_starts",
   "task_due_soon",
   "task_due",
+  "subtasks_done",
 ] as const;
 export const NotificationKind = z.enum(NOTIFICATION_KINDS);
 export type NotificationKind = z.infer<typeof NotificationKind>;
@@ -253,6 +261,8 @@ export interface Project {
   id: string;
   name: string;
   description: string;
+  /** Prompt a parent task's assignee to mark it done when all its subtasks are done. */
+  notifySubtasksDone: boolean;
   /** The signed-in user's role in this project. */
   role: ProjectRole;
   createdAt: string;
@@ -347,6 +357,8 @@ export interface Notification {
   actorName: string | null;
   taskId: string | null;
   taskTitle: string | null;
+  /** The task's current status, so `subtasks_done` can offer "Mark as done" only while it's open. */
+  taskStatus: TaskStatus | null;
   testCaseId: string | null;
   testTitle: string | null;
   commentId: string | null;

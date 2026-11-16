@@ -39,6 +39,7 @@ server/   Express 5 API on Node's built-in SQLite (node:sqlite, no native deps)
   src/access.ts       requireProjectRole middleware + project resolvers
   src/notify.ts       creates notifications (assignments, mentions, replies) and stores comment mentions
   src/reminders.ts    sendTaskReminders(db, today) + the 15-minute scheduler started in index.ts
+  src/rollup.ts       syncSubtasksDone: "all subtasks are done" prompts to a parent task's assignee
   src/activity.ts     logActivity + changes/snapshot diff helpers and the tracked fields per entity
   src/events.ts       in-process EventHub: logActivity publishes a ProjectEvent after commit
   src/routes/events.ts  GET /api/projects/:id/events — server-sent event stream per project
@@ -83,7 +84,8 @@ docs/ROADMAP.md       prioritised backlog
 - `comment_mentions(comment_id, user_id)` — who a comment @-mentioned, computed once when it's posted.
 - `notifications(user_id, actor_id, project_id, kind, task_id, test_case_id, comment_id, read_at)` — one row
   per recipient; `kind` is `task_assigned` / `test_assigned` / `mention` / `reply` / `task_starts` /
-  `task_due_soon` / `task_due` (CHECK + `NotificationKind`; widening the CHECK means recreating the table).
+  `task_due_soon` / `task_due` / `subtasks_done` (CHECK + `NotificationKind`; widening the CHECK means recreating
+  the table, copying rowid).
   Cascades from the task, test case or comment it points at; removed when the recipient leaves the project.
 - `activity(project_id, actor_id, entity, entity_id, task_id, action, label, diff, created_at)` — the audit log.
   Entities: `project` / `member` / `task` / `comment` / `test_case` / `label`.
@@ -155,6 +157,13 @@ docs/ROADMAP.md       prioritised backlog
   and on it, with `actorId: null`. They use the server's local date and aren't sent late if a day was missed.
   `/api/notifications` is user-scoped (ownership check, not `requireProjectRole`); the web polls it every 30s
   under the `["notifications"]` key.
+- **Status roll-up is a prompt, not an automatic change.** When every subtask of an open parent is done, the parent's
+  assignee gets a `subtasks_done` notification (sent even if they did it themselves, via `includeActor`) with a
+  "Mark as done" button in the inbox; the task dialog shows the same hint to editors. Unassigned parents get none.
+  It's per project (`projects.notify_subtasks_done`, default on, owners toggle it). Any task write that can change
+  this (status, assignee, parent, create, delete, move) calls `syncSubtasksDone(db, [task, oldParent, newParent])`
+  in its transaction; it sends, moves (on reassignment) or withdraws prompts. Prompts on a parent that's now done
+  are kept as a record.
 - **Real-time updates come from the activity log.** `logActivity` queues a `ProjectEvent` with `afterCommit`
   (`server/src/db/index.ts`), so only committed writes are published. A write that's deliberately not audited
   (only task reorders, so far) must call `publishEvent` itself, or other clients won't see it. Events carry ids only, never data: clients refetch through the normal access-checked API.

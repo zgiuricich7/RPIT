@@ -167,6 +167,11 @@ function TaskDialog(props: {
     onClose();
   }
 
+  // Status roll-up hint: every subtask is done but this task isn't (its assignee is also notified).
+  const subtasks = task ? tasks.filter((t) => t.parentId === task.id) : [];
+  const readyToClose =
+    canEdit && !!task && task.status !== "done" && subtasks.length > 0 && subtasks.every((t) => t.status === "done");
+
   const busy = create.isPending || update.isPending;
   const heading = !task ? "New task" : canEdit ? "Edit task" : "Task";
   return (
@@ -186,6 +191,18 @@ function TaskDialog(props: {
             readOnly={!canEdit}
             maxLength={20_000}
           />
+          {readyToClose && (
+            <div className="hint-box" role="status">
+              All {subtasks.length} subtask{subtasks.length > 1 ? "s are" : " is"} done.
+              {form.status !== "done" ? (
+                <button type="button" className="btn sm" onClick={() => set("status", "done")}>
+                  Set status to Done
+                </button>
+              ) : (
+                <span className="muted">Save the task to mark it done.</span>
+              )}
+            </div>
+          )}
           <div className="two">
             <label className="field">
               Status
@@ -627,16 +644,17 @@ export function ProjectDialog({ project, onClose }: { project: Project | null; o
   const update = useUpdateProject();
   const [name, setName] = useState(project?.name ?? "");
   const [description, setDescription] = useState(project?.description ?? "");
+  const [notifySubtasksDone, setNotifySubtasksDone] = useState(project?.notifySubtasksDone ?? true);
   const [error, setError] = useState<string | null>(null);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     try {
       if (project) {
-        await update.mutateAsync({ id: project.id, name, description });
+        await update.mutateAsync({ id: project.id, name, description, notifySubtasksDone });
         onClose();
       } else {
-        const p = await create.mutateAsync({ name, description });
+        const p = await create.mutateAsync({ name, description, notifySubtasksDone });
         onClose();
         navigate(`/projects/${p.id}/overview`);
       }
@@ -660,6 +678,14 @@ export function ProjectDialog({ project, onClose }: { project: Project | null; o
           onValueChange={setDescription}
           maxLength={20_000}
         />
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={notifySubtasksDone}
+            onChange={(e) => setNotifySubtasksDone(e.target.checked)}
+          />
+          When all of a task's subtasks are done, ask its assignee to mark it done
+        </label>
         {error && <div className="form-error">{error}</div>}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button type="button" className="btn" onClick={onClose}>

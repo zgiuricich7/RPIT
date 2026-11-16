@@ -13,7 +13,8 @@ and test case tracking — with a per-project overview dashboard.
 - **Comments** on every task, with authors and timestamps, **@-mentions** of project members, and editing
 - **Markdown** in comments and every description/notes field, with a formatting toolbar and preview
 - **Inbox** of in-app notifications when you're assigned a task or test, mentioned, or someone
-  comments on a task you follow
+  comments on a task you follow; and a prompt with a **Mark as done** button when all of a task's subtasks are
+  done (a per-project setting)
 - **Test cases** with steps, expected result, notes, assignee, priority and a linked task;
   dashboard with pass rate and status filters
 - **Activity log**: every change to projects, members, tasks, labels, comments and test cases is recorded

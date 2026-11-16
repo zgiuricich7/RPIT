@@ -34,6 +34,7 @@ export const toProject = (r: Row): Project => ({
   id: r.id as string,
   name: r.name as string,
   description: r.description as string,
+  notifySubtasksDone: Boolean(r.notify_subtasks_done),
   role: r.role as ProjectRole,
   createdAt: r.created_at as string,
   updatedAt: r.updated_at as string,
@@ -114,6 +115,7 @@ export const toNotification = (r: Row): Notification => ({
   actorName: (r.actor_name as string | null) ?? null,
   taskId: (r.task_id as string | null) ?? null,
   taskTitle: (r.task_title as string | null) ?? null,
+  taskStatus: (r.task_status as Notification["taskStatus"]) ?? null,
   testCaseId: (r.test_case_id as string | null) ?? null,
   testTitle: (r.test_title as string | null) ?? null,
   commentId: (r.comment_id as string | null) ?? null,
@@ -160,7 +162,7 @@ export const COMMENT_SELECT = `
  * Bind the user id first.
  */
 export const NOTIFICATION_SELECT = `
-  SELECT n.*, p.name AS project_name, a.name AS actor_name, t.title AS task_title,
+  SELECT n.*, p.name AS project_name, a.name AS actor_name, t.title AS task_title, t.status AS task_status,
          tc.title AS test_title, substr(c.body, 1, 200) AS excerpt
   FROM notifications n
   JOIN projects p ON p.id = n.project_id

@@ -7,6 +7,7 @@ import { notFound, param, parseBody } from "../http.ts";
 import { currentUser } from "../auth.ts";
 import { requireProjectRole } from "../access.ts";
 import { changes, logActivity, PROJECT_FIELDS, snapshot } from "../activity.ts";
+import { syncProjectSubtasksDone } from "../rollup.ts";
 
 export function projectRoutes(db: DB) {
   const r = Router();
@@ -39,7 +40,12 @@ export function projectRoutes(db: DB) {
     const user = currentUser(req);
     const id = newId();
     transaction(db, () => {
-      db.prepare(`INSERT INTO projects (id, name, description) VALUES (?, ?, ?)`).run(id, input.name, input.description);
+      db.prepare(`INSERT INTO projects (id, name, description, notify_subtasks_done) VALUES (?, ?, ?, ?)`).run(
+        id,
+        input.name,
+        input.description,
+        input.notifySubtasksDone ? 1 : 0,
+      );
       db.prepare(`INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, 'owner')`).run(id, user.id);
       logActivity(db, {
         ...projectEntry(id, user.id, input.name),
@@ -68,15 +74,18 @@ export function projectRoutes(db: DB) {
     const userId = currentUser(req).id;
     const cur = get(id, userId);
     const p = parseBody(ProjectPatch, req.body);
-    const next = { name: p.name ?? cur.name, description: p.description ?? cur.description };
+    const next = {
+      name: p.name ?? cur.name,
+      description: p.description ?? cur.description,
+      notifySubtasksDone: p.notifySubtasksDone ?? cur.notifySubtasksDone,
+    };
     transaction(db, () => {
-      db.prepare(`UPDATE projects SET name = ?, description = ?, updated_at = ? WHERE id = ?`).run(
-        next.name,
-        next.description,
-        now(),
-        id,
-      );
+      db.prepare(
+        `UPDATE projects SET name = ?, description = ?, notify_subtasks_done = ?, updated_at = ? WHERE id = ?`,
+      ).run(next.name, next.description, next.notifySubtasksDone ? 1 : 0, now(), id);
       logActivity(db, { ...projectEntry(id, userId, next.name), action: "updated", diff: changes(cur, next, PROJECT_FIELDS) });
+      // Turning prompts on sends any that are due now; turning them off withdraws open ones.
+      if (next.notifySubtasksDone !== cur.notifySubtasksDone) syncProjectSubtasksDone(db, id, userId);
     });
     res.json(get(id, userId));
   });

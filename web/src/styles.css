@@ -144,6 +144,11 @@ main.page { padding: 20px; max-width: 1400px; margin: 0 auto; }
 .toggle-chip:hover { opacity: 1; }
 .label-add { display: inline-flex; gap: 6px; align-items: center; }
 .label-add input { width: 160px; padding: 3px 8px; font-size: 12px; }
+.hint-box {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; font-size: 13px;
+  border: 1px solid color-mix(in srgb, var(--done) 45%, transparent); border-radius: var(--radius);
+  background: color-mix(in srgb, var(--done) 8%, transparent);
+}
 .label-preview { align-self: center; padding-bottom: 6px; }
 .labels-table { min-width: 560px; }
 .labels-table input { max-width: 260px; }
@@ -272,6 +277,7 @@ main.inbox { max-width: 820px; }
 .inbox-list { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
 .inbox-item { display: grid; grid-template-columns: 10px 1fr auto; gap: 10px; align-items: start; padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .inbox-item:last-child { border-bottom: 0; }
+.inbox-action { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
 .inbox-item .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 7px; }
 .inbox-item.unread .dot { background: var(--acc); }
 .inbox-item:not(.unread) .inbox-main { color: var(--mute); }

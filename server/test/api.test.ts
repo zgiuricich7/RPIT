@@ -931,3 +931,93 @@ describe("migration 7 (labels)", () => {
     expect(() => db.exec(`UPDATE activity SET label = 'x'`)).toThrow(/append-only/);
   });
 });
+
+describe("subtasks done prompts (status roll-up)", () => {
+  type N = { kind: string; taskId: string; taskStatus: string | null; actorName: string | null; read: boolean };
+  const prompts = async (a: Awaited<ReturnType<typeof signUp>> = ctx.agent) =>
+    ((await a.get("/api/notifications").expect(200)).body.items as N[]).filter((n) => n.kind === "subtasks_done");
+  const mk = (body: Record<string, unknown>) =>
+    ctx.agent.post(`/api/projects/${ctx.projectId}/tasks`).send(body).expect(201).then((r) => r.body as { id: string });
+  const setStatus = (id: string, status: string) => ctx.agent.patch(`/api/tasks/${id}`).send({ status }).expect(200);
+
+  it("prompts the parent's assignee (even if they finished the last subtask), once, without changing the parent", async () => {
+    const { userId } = ctx;
+    const parent = await mk({ title: "P", assigneeId: userId });
+    const a = await mk({ title: "A", parentId: parent.id });
+    const b = await mk({ title: "B", parentId: parent.id });
+    await setStatus(a.id, "done");
+    expect(await prompts()).toEqual([]);
+    await setStatus(b.id, "done");
+    const [p, ...rest] = await prompts();
+    expect(rest).toEqual([]);
+    expect(p).toMatchObject({ taskId: parent.id, taskStatus: "todo", actorName: "Tester", read: false });
+    expect((await ctx.agent.get(`/api/tasks/${parent.id}`)).body.status).toBe("todo");
+
+    // Another edit doesn't repeat it; marking the parent done keeps it, now showing the parent as done.
+    await ctx.agent.patch(`/api/tasks/${b.id}`).send({ title: "B2" }).expect(200);
+    expect(await prompts()).toHaveLength(1);
+    await setStatus(parent.id, "done");
+    expect(await prompts()).toEqual([expect.objectContaining({ taskId: parent.id, taskStatus: "done" })]);
+  });
+
+  it("withdraws the prompt when a subtask is reopened or added, and re-sends when they're done again", async () => {
+    const parent = await mk({ title: "P", assigneeId: ctx.userId });
+    const a = await mk({ title: "A", parentId: parent.id, status: "done" });
+    expect(await prompts()).toHaveLength(1); // created done: the only subtask is done
+    await setStatus(a.id, "in_progress");
+    expect(await prompts()).toEqual([]);
+    await setStatus(a.id, "done");
+    expect(await prompts()).toHaveLength(1);
+    const c = await mk({ title: "C", parentId: parent.id });
+    expect(await prompts()).toEqual([]);
+    await ctx.agent.delete(`/api/tasks/${c.id}`).expect(204); // the open one goes: all remaining are done
+    expect(await prompts()).toHaveLength(1);
+  });
+
+  it("follows moves and reassignment, and skips unassigned parents", async () => {
+    const { db, agent, projectId, userId } = ctx;
+    const other = await signUp(db, "Bea", "bea@x.com");
+    const beaId = (await other.get("/api/auth/me")).body.id as string;
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "bea@x.com", role: "editor" }).expect(201);
+
+    const unassigned = await mk({ title: "U" });
+    const parent = await mk({ title: "P", assigneeId: userId });
+    const open = await mk({ title: "Open", parentId: parent.id });
+    await mk({ title: "Done", parentId: unassigned.id, status: "done" });
+    expect(await prompts()).toEqual([]);
+
+    // Moving the open subtask out leaves P with no subtasks at all: still no prompt.
+    await agent.post(`/api/tasks/${open.id}/move`).send({ parentId: unassigned.id }).expect(200);
+    expect(await prompts()).toEqual([]);
+    await mk({ title: "Done2", parentId: parent.id, status: "done" });
+    expect(await prompts()).toHaveLength(1);
+
+    // Reassigning moves the prompt to the new assignee.
+    await agent.patch(`/api/tasks/${parent.id}`).send({ assigneeId: beaId }).expect(200);
+    expect(await prompts()).toEqual([]);
+    expect(await prompts(other)).toEqual([expect.objectContaining({ taskId: parent.id, actorName: "Tester" })]);
+    await agent.patch(`/api/tasks/${parent.id}`).send({ assigneeId: null }).expect(200);
+    expect(await prompts(other)).toEqual([]);
+  });
+
+  it("is a project setting: off withdraws open prompts and stops new ones, on sends any due", async () => {
+    const { agent, projectId, userId } = ctx;
+    expect((await agent.get(`/api/projects/${projectId}`)).body.notifySubtasksDone).toBe(true);
+    const parent = await mk({ title: "P", assigneeId: userId });
+    await mk({ title: "A", parentId: parent.id, status: "done" });
+    expect(await prompts()).toHaveLength(1);
+
+    await agent.patch(`/api/projects/${projectId}`).send({ notifySubtasksDone: false }).expect(200);
+    expect(await prompts()).toEqual([]);
+    await mk({ title: "B", parentId: parent.id, status: "done" });
+    expect(await prompts()).toEqual([]);
+
+    await agent.patch(`/api/projects/${projectId}`).send({ notifySubtasksDone: true }).expect(200);
+    expect(await prompts()).toHaveLength(1);
+    const log = (await agent.get(`/api/projects/${projectId}/activity`)).body.items;
+    expect(log[0].diff).toEqual({ notifySubtasksDone: { from: false, to: true } });
+
+    const off = (await agent.post("/api/projects").send({ name: "Quiet", notifySubtasksDone: false }).expect(201)).body;
+    expect(off.notifySubtasksDone).toBe(false);
+  });
+});

@@ -44,7 +44,12 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
     in the task dialog; a Labels page to rename, recolour and delete them with usage counts; a label filter
     (including "No labels") kept in the URL; label and task-label changes are audited and live-updated.
     Follow-up: labels on test cases, label descriptions, searching by label name, and grouping the board by label.
-2.5 **Status roll-up option**: automatically set a parent to Done when all children are done.
+2.5 ~~**Status roll-up option**~~ Done: when every subtask of an open parent task is done, the parent's assignee
+    gets an inbox notification with a "Mark as done" button (the parent isn't changed automatically); editors see
+    the same hint in the task dialog. Prompts are withdrawn if a subtask is reopened or added, follow reassignment,
+    and skip unassigned parents. Per-project setting (on by default) in Edit project.
+    Follow-up: an opt-in fully automatic mode, reopening a done parent when a subtask is reopened, and notifying
+    owners for unassigned parents.
 2.6 **Attachments** on tasks and test cases.
 2.7 **Configurable board columns** per project (custom statuses).
 

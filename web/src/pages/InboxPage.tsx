@@ -1,7 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { markdownToPlainText, type Notification } from "@rpit/shared";
-import { useMarkAllNotificationsRead, useMarkNotification, useNotifications } from "../api/hooks.ts";
+import {
+  useMarkAllNotificationsRead,
+  useMarkNotification,
+  useNotifications,
+  useProjectRole,
+  useUpdateTask,
+} from "../api/hooks.ts";
 import { TopBar } from "../components/TopBar.tsx";
 import { formatDateTime } from "../lib/format.ts";
 
@@ -23,6 +29,8 @@ function describe(n: Notification) {
       return "Due tomorrow:";
     case "task_due":
       return "Due today:";
+    case "subtasks_done":
+      return "All subtasks are done for";
   }
 }
 
@@ -108,6 +116,7 @@ function InboxItem({ n }: { n: Notification }) {
           {!n.read && <span className="visually-hidden"> (unread)</span>}
         </div>
         {n.excerpt && <div className="excerpt">{markdownToPlainText(n.excerpt)}</div>}
+        {n.kind === "subtasks_done" && n.taskId && <MarkDoneAction n={n} />}
         <div className="muted meta">
           {n.projectName} · {formatDateTime(n.createdAt)}
         </div>
@@ -120,5 +129,33 @@ function InboxItem({ n }: { n: Notification }) {
         {n.read ? "Mark as unread" : "Mark as read"}
       </button>
     </li>
+  );
+}
+
+/**
+ * "Mark as done" on a subtasks_done prompt: shown while the task is still open,
+ * to members who can edit tasks (a viewer assignee can only open it).
+ */
+function MarkDoneAction({ n }: { n: Notification }) {
+  const { canEdit } = useProjectRole(n.projectId);
+  const update = useUpdateTask(n.projectId);
+  const mark = useMarkNotification();
+  if (n.taskStatus === "done") return <div className="muted meta">Marked as done</div>;
+  if (!canEdit) return null;
+
+  const markDone = () =>
+    update.mutate(
+      { id: n.taskId!, status: "done" },
+      // Marking it read (a no-op if it already is) also refreshes the inbox, which now shows it as done.
+      { onSuccess: () => mark.mutate({ id: n.id, read: true }) },
+    );
+
+  return (
+    <div className="inbox-action">
+      <button className="btn sm primary" disabled={update.isPending} onClick={markDone}>
+        {update.isPending ? "Saving…" : "Mark as done"}
+      </button>
+      {update.error && <span className="form-error">{update.error.message}</span>}
+    </div>
   );
 }
