@@ -37,10 +37,9 @@ import {
   compareTasks,
   flattenTree,
   leafProgress,
-  matchesDueFilter,
   matchesWithAncestors,
   projectTreeDrop,
-  type DueFilter,
+  type TaskFilter,
   type FlatRow,
   type Task,
   type TaskSort,
@@ -58,9 +57,13 @@ import { formatDate } from "../lib/format.ts";
  * the server turns them into a position (see TaskMove / positionBetween).
  */
 
-/** Due filter and sort order, kept in the URL (?due=overdue&sort=due) so a view can be shared. */
+/** Filters and sort order from the URL (see TaskFilter), plus what the views need to apply them. */
 export interface ViewOptions {
-  due: DueFilter;
+  filter: TaskFilter;
+  /** True for tasks that pass every filter. */
+  matches: (t: Task) => boolean;
+  /** Any filter is narrowing the list. */
+  filtered: boolean;
   sort: TaskSort;
   today: string;
 }
@@ -101,16 +104,16 @@ const screenReaderInstructions = {
 
 export function ListView(props: { projectId: string; tasks: Task[]; users: User[] | undefined; canEdit: boolean; opts: ViewOptions }) {
   const { projectId, tasks, users, canEdit, opts } = props;
-  const { due, sort, today } = opts;
+  const { matches, filtered, sort, today } = opts;
   const move = useMoveTask(projectId);
   const sensors = useDragSensors();
   // Order and nesting only mean something in manual order with every task shown.
-  const draggable = canEdit && due === "all" && sort === "manual";
+  const draggable = canEdit && !filtered && sort === "manual";
 
   // Matching tasks plus their ancestors (dimmed, for context); null when nothing is filtered out.
   const visible = useMemo(
-    () => (due === "all" ? null : matchesWithAncestors(tasks, (t) => matchesDueFilter(t, due, today))),
-    [tasks, due, today],
+    () => (filtered ? matchesWithAncestors(tasks, matches) : null),
+    [tasks, filtered, matches],
   );
   const shown = useMemo(() => (visible ? tasks.filter((t) => visible.has(t.id)) : tasks), [tasks, visible]);
   const tree = useMemo(() => buildTree(shown, compareTasks(sort)), [shown, sort]);
@@ -185,7 +188,7 @@ export function ListView(props: { projectId: string; tasks: Task[]; users: User[
           <span className="muted hint">
             {draggable
               ? "Drag ⠿ to reorder; drag right to make a subtask, left to move it out."
-              : "Switch to manual order with any due date to drag tasks."}
+              : "Clear filters and use manual order to drag tasks."}
           </span>
         )}
       </div>
@@ -227,7 +230,7 @@ export function ListView(props: { projectId: string; tasks: Task[]; users: User[
                     childCount={(kids.get(row.id) ?? []).length}
                     open={!collapsed.has(row.id)}
                     onToggle={() => toggle(row.id)}
-                    context={due !== "all" && !matchesDueFilter(byId.get(row.id)!, due, today)}
+                    context={filtered && !matches(byId.get(row.id)!)}
                     {...{ tasks, users, canEdit, draggable, today }}
                   />
                 ))}
@@ -330,7 +333,9 @@ const noReorder: SortingStrategy = () => null;
 
 export function BoardView(props: { projectId: string; tasks: Task[]; users: User[] | undefined; canEdit: boolean; opts: ViewOptions }) {
   const { projectId, tasks, users, canEdit } = props;
-  const { due, sort, today } = props.opts;
+  const { filter, matches, sort, today } = props.opts;
+  // Filtering by status shows just those columns.
+  const statuses = filter.status.length ? TASK_STATUSES.filter((s) => filter.status.includes(s)) : TASK_STATUSES;
   const move = useMoveTask(projectId);
   const sensors = useDragSensors();
   const [leafOnly, setLeafOnly] = useState(false);
@@ -342,11 +347,11 @@ export function BoardView(props: { projectId: string; tasks: Task[]; users: User
   const columns = useMemo(() => {
     const out = Object.fromEntries(TASK_STATUSES.map((s) => [s, [] as Task[]])) as Record<TaskStatus, Task[]>;
     for (const t of tasks) {
-      if ((!leafOnly || !hasKids(t.id)) && matchesDueFilter(t, due, today)) out[t.status].push(t);
+      if ((!leafOnly || !hasKids(t.id)) && matches(t)) out[t.status].push(t);
     }
     if (sort !== "manual") for (const s of TASK_STATUSES) out[s].sort(compareTasks(sort));
     return Object.fromEntries(TASK_STATUSES.map((s) => [s, out[s].map((t) => t.id)])) as Columns;
-  }, [tasks, leafOnly, due, today, sort, idx]);
+  }, [tasks, leafOnly, matches, sort, idx]);
 
   // While dragging, a working copy of the columns so the card previews in its new place.
   const [draft, setDraft] = useState<Columns | null>(null);
@@ -471,8 +476,8 @@ export function BoardView(props: { projectId: string; tasks: Task[]; users: User
           setActiveId(null);
         }}
       >
-        <div className="board">
-          {TASK_STATUSES.map((status) => (
+        <div className="board" style={{ "--board-cols": statuses.length } as CSSProperties}>
+          {statuses.map((status) => (
             <BoardColumn
               key={status}
               status={status}

@@ -27,6 +27,7 @@ Always run `npm run typecheck && npm test` before considering a change done.
 shared/   @rpit/shared — zod schemas, enums, labels, response types, tree utils, mention parsing,
           calendar-date helpers (dates.ts: due state, due filters, sibling sort comparators),
           list drag-to-nest projection (treeDrag.ts: flattenTree, projectTreeDrop),
+          task filters (filters.ts: TaskFilter, URL parse/params, taskMatcher),
           Markdown toolbar text transforms (markdown.ts, pure functions with tests).
           Imported as TypeScript source by both server and web (no build step).
 server/   Express 5 API on Node's built-in SQLite (node:sqlite, no native deps)
@@ -52,7 +53,8 @@ web/      React 19 + Vite + TanStack Query + React Router 7
   src/components/mentions.tsx  @-mention autocomplete textarea (used by MarkdownEditor)
   src/components/TopBar.tsx    header with project switcher and inbox badge
   src/components/activity.tsx  ActivityFeed: renders log entries as sentences + field changes
-  src/pages/          Overview, Tasks (List + Board, due filter and sort in ?due= / ?sort=), Tests, Members, Inbox, Auth
+  src/pages/          Overview, Tasks (List + Board; filters and sort in the URL), Tests, Members, Inbox, Auth
+  src/components/TaskFilters.tsx  search box ("/" focuses it) + assignee/priority/status/due filter menus
   src/pages/taskViews.tsx  List and Board views with @dnd-kit drag and drop (mouse, touch, keyboard)
   src/styles.css      design tokens (light/dark) and all styles; plain CSS, no framework
 docs/ROADMAP.md       prioritised backlog
@@ -106,6 +108,12 @@ docs/ROADMAP.md       prioritised backlog
   A pure reorder isn't audited (position is internal) but publishes a real-time event directly; parent and
   status changes from a move are logged as usual. Dragging is only enabled in manual order (and, in the list,
   with no due filter); a sorted board still allows moving cards between columns.
+- **Task filters live in the URL** (`?q=&assignee=me,none,<id>&priority=&status=&due=`), parsed with
+  `parseTaskFilter` and written with `taskFilterParams` (`shared/src/filters.ts`) so other params (view, sort,
+  open dialogs) survive. Values in one filter are OR'ed, filters are AND'ed; search needs every word in the title
+  or description (case/accent-insensitive). Filtering is client-side over the loaded task list; `taskMatcher`
+  is the single definition of "matches". The list keeps matches' ancestors (dimmed) for context; the board
+  shows only the filtered status columns. List drag is off while any filter is active.
 - **Progress = leaf tasks done / leaf tasks** (tasks with no children). Use `leafProgress` from shared;
   the server's `projectSummary` uses the same function, so overview numbers match the UI.
 - **Cache invalidation:** task/test/comment mutations invalidate `["project", projectId]`, which covers

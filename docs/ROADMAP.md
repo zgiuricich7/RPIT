@@ -35,7 +35,10 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
     reorder within and between board columns, drag list rows to reorder and sideways to nest/un-nest.
     `POST /api/tasks/:id/move` places a task between neighbours in one project-wide `position` rank.
     Follow-up: keyboard nesting in the list, multi-select drag, and auto-expanding a collapsed row on hover.
-2.3 **Filters and search** on list and board: assignee, priority, status, text. Persist in URL.
+2.3 ~~**Filters and search**~~ Done: text search (title and description, "/" to focus) and assignee
+    (including "Me" and "Unassigned"), priority, status and due filters on the list and board, kept in the
+    URL so filtered views can be bookmarked and shared. Follow-up: saved views, searching comments, and
+    server-side filtering if task lists get large.
 2.4 **Labels/tags** per project.
 2.5 **Status roll-up option**: automatically set a parent to Done when all children are done.
 2.6 **Attachments** on tasks and test cases.
