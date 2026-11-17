@@ -219,9 +219,11 @@ a.title-btn { text-decoration: none; }
 .project-crumbs a:hover { color: var(--ink); }
 .client-chip { padding: 0 7px; border: 1px solid var(--line); border-radius: 99px; text-decoration: none; }
 .project-where { font-size: 12px; }
-.plan-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
-.plan-card { text-align: left; font: inherit; color: inherit; cursor: pointer; display: grid; gap: 8px; }
-.plan-card h3 { margin: 0; display: flex; gap: 8px; align-items: center; }
+.plan-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 14px; }
+.plan-card { text-align: left; font: inherit; color: inherit; cursor: pointer; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
+.plan-card h3 { margin: 0; display: flex; gap: 8px; align-items: baseline; min-width: 0; overflow-wrap: anywhere; }
+.plan-card h3 > .plan-state { flex: none; }
+.project-where { overflow-wrap: anywhere; }
 .plan-card .stack { margin: 0; }
 .plan-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--mute); }
 .plan-state { font-size: 11px; padding: 0 7px; border-radius: 99px; border: 1px solid currentColor; font-weight: 500; }
