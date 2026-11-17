@@ -34,7 +34,8 @@ shared/   @rpit/shared — zod schemas, enums, labels, response types, tree util
           task filters (filters.ts: TaskFilter, URL parse/params, taskMatcher),
           test suites (suites.ts: suiteTree, suitePath, suiteStats/testStats pass rates, testsInSuite),
           test coverage (coverage.ts: taskCoverage roll-up, coverageState, coverageSummary),
-          sub-project trees (projects.ts: projectTree, flattenProjects, projectAncestors, projectPath),
+          sub-project trees (projects.ts: projectTree, flattenProjects, projectAncestors, projectPath,
+          groupByClient, projectMatcher for the home page search),
           Markdown toolbar text transforms (markdown.ts, pure functions with tests).
           Imported as TypeScript source by both server and web (no build step).
 server/   Express 5 API on SQLite (node:sqlite, the default) or Postgres (`pg`, or PGlite in-process)
@@ -79,6 +80,8 @@ web/      React 19 + Vite + TanStack Query + React Router 7
   src/components/templates.tsx  SaveTemplateDialog (overview), TemplateDialog (rename + share), templateSummary
   src/components/projects.tsx  ParentProjectOptions, ClientSelect (with "New client…"), ProjectBreadcrumb,
                                projectLocation, ClientDialog
+  src/components/ui.tsx        Modal, Meter, DueDate, pills… and Collapsible (heading that hides its body; open state
+                               remembered in localStorage via useCollapsed, body rendered only while open)
   src/components/labels.tsx    LabelPicker (toggle chips + create) for the task dialog; LabelChip/TaskLabels are in ui.tsx
   src/pages/          Home (dashboard at /), Clients (/clients), Templates (/templates), Overview, Tasks (List + Board; filters and sort in the URL), Tests, Plans (list, ?plan=<id> detail), Coverage,
                       Labels, Members, Inbox, Auth
@@ -233,6 +236,7 @@ docs/ROADMAP.md       prioritised backlog
 - **The home page (`/`) is a dashboard across the user's projects**, from one call: `GET /api/dashboard?today=`
   (the viewer's local date, so overdue stays the viewer's: the server only compares it). It's membership-scoped
   by its queries (no `requireProjectRole`). Signing in, the brand and the "Home" link all land there.
+  Project cards are grouped by client (`groupByClient`, collapsible) and searched with `projectMatcher` (`?q=`).
 - **Project templates are snapshots, not links.** `snapshotProject` copies columns, labels, the task tree (title,
   description, priority, column, labels), suites, test cases (title, priority, suite, linked task, notes, steps) and
   open plans; never people, dates, comments, runs or files. Applying one (`POST /api/projects` with `templateId`,

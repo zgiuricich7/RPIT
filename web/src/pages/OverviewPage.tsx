@@ -34,7 +34,7 @@ import { SaveTemplateDialog } from "../components/templates.tsx";
 import { ProjectBreadcrumb } from "../components/projects.tsx";
 import { ProjectRow } from "./ClientsPage.tsx";
 import { CommentBody, MarkdownView } from "../components/markdown.tsx";
-import { DueDate, Meter, Stack, TaskStatusPill, TestStatusPill, useToday } from "../components/ui.tsx";
+import { Collapsible, DueDate, Meter, Stack, TaskStatusPill, TestStatusPill, useToday } from "../components/ui.tsx";
 import { formatDateTime } from "../lib/format.ts";
 import { TEST_COLORS } from "./TestsPage.tsx";
 import { progressText } from "./PlansPage.tsx";
@@ -59,7 +59,6 @@ export function OverviewPage() {
   const recent = useRecentComments(project.id).data ?? [];
   const projects = useProjects().data ?? [];
   const del = useDeleteProject();
-  const activity = useProjectActivity(project.id);
   const [editing, setEditing] = useState(false);
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [newSubproject, setNewSubproject] = useState(false);
@@ -268,10 +267,9 @@ export function OverviewPage() {
         <Attachments projectId={project.id} canEdit={project.role !== "viewer"} heading="Project files" />
       </div>
 
-      <div className="panel">
-        <h3>Activity</h3>
-        <ActivityFeed projectId={project.id} scope="project" query={activity} />
-      </div>
+      <Collapsible className="panel" storageKey="overview.activity" title="Activity">
+        {() => <ProjectActivity projectId={project.id} />}
+      </Collapsible>
 
       <h3 style={{ margin: "20px 0 10px", fontSize: 14 }}>All projects</h3>
       <div className="panels">
@@ -309,4 +307,10 @@ function ProjectCard({ project, selected }: { project: Project; selected: boolea
       )}
     </button>
   );
+}
+
+/** The project's log, fetched only while the Activity section is open. */
+function ProjectActivity({ projectId }: { projectId: string }) {
+  const activity = useProjectActivity(projectId);
+  return <ActivityFeed projectId={projectId} scope="project" query={activity} />;
 }

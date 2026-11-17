@@ -178,6 +178,26 @@ main.home .panel { min-width: 0; }
 .home-row { align-items: flex-start; }
 .home-sub { font-size: 12px; }
 .home-heading { margin: 20px 0 10px; font-size: 14px; }
+.home-projects-bar { margin: 20px 0 10px; }
+.home-projects-bar .home-heading { margin: 0; }
+.home-projects-bar .search { padding: 7px 10px; font-size: 13px; line-height: 1.3; width: 240px; max-width: 100%; }
+.client-group { margin-bottom: 14px; }
+.client-group > .collapsible-head { font-size: 13px; margin: 0 0 8px; }
+@media (max-width: 700px) { .home-projects-bar .search { width: 100%; } }
+
+/* ---------- Collapsible sections ---------- */
+.collapsible > .collapsible-head { margin: 0; }
+.collapsible.open > .collapsible-head { margin-bottom: 10px; }
+.collapsible-head > button {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+  background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; text-align: left;
+}
+.collapsible-head > button:disabled { cursor: default; }
+.collapsible-head > button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; border-radius: 4px; }
+.collapsible-meta { font-weight: 400; font-size: 12px; }
+.chev { display: inline-block; width: 0; height: 0; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .15s; }
+.collapsible.open .chev { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .chev { transition: none; } }
 
 /* ---------- Coverage ---------- */
 .coverage-badge { font-size: 11px; font-weight: 600; margin-left: 6px; white-space: nowrap; }

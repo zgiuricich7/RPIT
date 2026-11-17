@@ -1,4 +1,5 @@
 import type { Project } from "./schemas.ts";
+import { normalizeSearch } from "./filters.ts";
 import { suitePath, suiteSubtreeIds, suiteTree, type SuiteNode } from "./suites.ts";
 
 /**
@@ -48,4 +49,45 @@ export function projectAncestors<P extends ProjectLike>(projects: P[], id: strin
     out.unshift(p);
   }
   return out;
+}
+
+type GroupableProject = ProjectLike & Pick<Project, "clientId" | "clientName">;
+
+export interface ClientGroup<P> {
+  /** null: projects without a client. */
+  clientId: string | null;
+  clientName: string | null;
+  projects: P[];
+}
+
+/**
+ * Groups items by their project's client: clients by name, then "no client"
+ * last. Items keep their order within a group.
+ */
+export function groupByClient<T>(items: T[], projectOf: (item: T) => Pick<Project, "clientId" | "clientName">): ClientGroup<T>[] {
+  const groups = new Map<string | null, ClientGroup<T>>();
+  for (const item of items) {
+    const { clientId, clientName } = projectOf(item);
+    const key = clientId ?? null;
+    let g = groups.get(key);
+    if (!g) groups.set(key, (g = { clientId: key, clientName: key ? clientName : null, projects: [] }));
+    g.projects.push(item);
+  }
+  return [...groups.values()].sort((a, b) => {
+    if (!a.clientId || !b.clientId) return a.clientId ? -1 : b.clientId ? 1 : 0;
+    return (a.clientName ?? "").localeCompare(b.clientName ?? "", undefined, { sensitivity: "base" });
+  });
+}
+
+/**
+ * Project search: every word must appear in the project's name, its client's
+ * name or the names of its visible parent projects (case/accent-insensitive).
+ */
+export function projectMatcher<P extends GroupableProject>(q: string, projects: P[]): (p: P) => boolean {
+  const words = normalizeSearch(q).split(/\s+/).filter(Boolean);
+  if (!words.length) return () => true;
+  return (p) => {
+    const text = normalizeSearch([p.name, p.clientName ?? "", projectPath(projects, p.parentId)].join("\n"));
+    return words.every((w) => text.includes(w));
+  };
 }

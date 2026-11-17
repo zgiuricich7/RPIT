@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { flattenProjects, projectAncestors, projectPath, projectSubtreeIds, projectTree } from "./projects.ts";
+import { flattenProjects, groupByClient, projectAncestors, projectMatcher, projectPath, projectSubtreeIds, projectTree } from "./projects.ts";
 
 const project = (id: string, name: string, parentId: string | null = null) => ({ id, name, parentId });
 const projects = [
@@ -38,5 +38,38 @@ describe("project tree", () => {
     const cyclic = [project("a", "A", "b"), project("b", "B", "a")];
     expect(projectAncestors(cyclic, "a").map((p) => p.id)).toEqual(["b"]);
     expect(projectTree(cyclic)).toEqual([]);
+  });
+});
+
+describe("grouping and search", () => {
+  const p = (id: string, name: string, client: [string, string] | null, parentId: string | null = null) => ({
+    id,
+    name,
+    parentId,
+    clientId: client?.[0] ?? null,
+    clientName: client?.[1] ?? null,
+  });
+  const list = [
+    p("a", "Website", ["c2", "zeta"]),
+    p("b", "Payroll", null),
+    p("c", "Café app", ["c1", "Acme"]),
+    p("d", "Checkout", ["c2", "zeta"], "a"),
+    p("e", "Internal", null),
+  ];
+
+  it("groups by client name, no client last, keeping order inside a group", () => {
+    const groups = groupByClient(list, (x) => x);
+    expect(groups.map((g) => g.clientName)).toEqual(["Acme", "zeta", null]);
+    expect(groups.map((g) => g.projects.map((x) => x.id))).toEqual([["c"], ["a", "d"], ["b", "e"]]);
+    expect(groupByClient([], (x: (typeof list)[number]) => x)).toEqual([]);
+  });
+
+  it("matches every word against name, client and parent path", () => {
+    const ids = (q: string) => list.filter(projectMatcher(q, list)).map((x) => x.id);
+    expect(ids("")).toEqual(["a", "b", "c", "d", "e"]);
+    expect(ids("cafe")).toEqual(["c"]);
+    expect(ids("ZETA")).toEqual(["a", "d"]);
+    expect(ids("website check")).toEqual(["d"]);
+    expect(ids("acme website")).toEqual([]);
   });
 });

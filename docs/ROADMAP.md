@@ -117,6 +117,11 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
     last activity, most recently active first. One `GET /api/dashboard?today=` call; refreshes every minute.
     Follow-up: archive projects (so "active" can exclude them), pin favourite projects, and a recent-activity feed
     across projects.
+4.2 ~~**UI cleanup**~~ Done: the overview's Activity section collapses (and only loads the log while open), like the
+    task and test dialogs' History. The home page groups project cards by client (clients by name, "No client"
+    last; no headings when nobody uses clients), each group collapsible, and a search box finds projects by name,
+    client or parent project (kept in `?q=`; matching groups open while searching). Open/closed sections are
+    remembered per browser.
 
 ## 5. Platform
 

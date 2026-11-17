@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   dueState,
   toCalendarDate,
@@ -120,5 +120,85 @@ export function DueDate({ task, today, compact }: { task: Pick<Task, "status" | 
     <span className={`due ${state ?? ""}`} title={full} aria-label={full}>
       {text}
     </span>
+  );
+}
+
+const COLLAPSED_KEY = "rpit.collapsed";
+
+function readCollapsed(): Set<string> {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_KEY);
+    const list: unknown = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(list) ? list.filter((x): x is string => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Whether the section `id` is open, remembered in this browser (a per-viewer
+ * convenience: it never reaches the server). Sections start open.
+ */
+export function useCollapsed(id: string, defaultOpen = true): [boolean, (open: boolean) => void] {
+  const [open, setOpenState] = useState(() => {
+    const stored = readCollapsed();
+    return defaultOpen ? !stored.has(id) : stored.has(`${id}:open`);
+  });
+  const setOpen = (next: boolean) => {
+    setOpenState(next);
+    try {
+      const stored = readCollapsed();
+      // Only remember the non-default state, so the list stays small.
+      const key = defaultOpen ? id : `${id}:open`;
+      if (next === defaultOpen) stored.delete(key);
+      else stored.add(key);
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...stored]));
+    } catch {
+      // Storage blocked: the section still toggles, it just isn't remembered.
+    }
+  };
+  return [open, setOpen];
+}
+
+/**
+ * A section with a heading that shows or hides its body. `storageKey` remembers
+ * the choice in this browser; `forceOpen` shows the body regardless (e.g. while
+ * searching). The body is only rendered while open, so queries inside it wait.
+ */
+export function Collapsible(props: {
+  storageKey: string;
+  title: ReactNode;
+  /** Shown after the title, e.g. a count. */
+  meta?: ReactNode;
+  defaultOpen?: boolean;
+  forceOpen?: boolean;
+  className?: string;
+  /** Heading level of the title. */
+  level?: 3 | 4;
+  children: () => ReactNode;
+}) {
+  const [stored, setOpen] = useCollapsed(props.storageKey, props.defaultOpen ?? true);
+  const open = props.forceOpen || stored;
+  const bodyId = useId();
+  const Heading = props.level === 4 ? "h4" : "h3";
+  return (
+    <section className={`collapsible${open ? " open" : ""}${props.className ? ` ${props.className}` : ""}`}>
+      <Heading className="collapsible-head">
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={bodyId}
+          disabled={props.forceOpen}
+          onClick={() => setOpen(!open)}
+        >
+          <span className="chev" aria-hidden="true" />
+          <span>{props.title}</span>
+          {props.meta !== undefined && <span className="muted collapsible-meta">{props.meta}</span>}
+        </button>
+      </Heading>
+      <div id={bodyId} hidden={!open}>
+        {open && props.children()}
+      </div>
+    </section>
   );
 }

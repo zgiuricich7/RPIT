@@ -1,11 +1,11 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { PROJECT_ROLE_LABELS, isOverdue, type DashboardProject } from "@rpit/shared";
+import { useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { PROJECT_ROLE_LABELS, groupByClient, isOverdue, projectMatcher, type Dashboard, type DashboardProject } from "@rpit/shared";
 import { useDashboard, useMe } from "../api/hooks.ts";
 import { ProjectDialog } from "../components/dialogs.tsx";
 import { projectLocation } from "../components/projects.tsx";
 import { TopBar } from "../components/TopBar.tsx";
-import { DueDate, Meter, TestStatusPill, useToday } from "../components/ui.tsx";
+import { Collapsible, DueDate, Meter, TestStatusPill, useToday } from "../components/ui.tsx";
 import { formatDateTime } from "../lib/format.ts";
 
 /**
@@ -106,21 +106,88 @@ export function HomePage() {
               </div>
             </div>
 
-            <h3 className="home-heading">Projects</h3>
-            <div className="plan-list">
-              {data.projects.map((p) => (
-                <ProjectTile
-                  key={p.project.id}
-                  p={p}
-                  where={projectLocation(p.project, data.projects.map((x) => x.project))}
-                  onOpen={() => navigate(`/projects/${p.project.id}/overview`)}
-                />
-              ))}
-            </div>
+            <HomeProjects projects={data.projects} />
           </>
         )}
         {creating && <ProjectDialog project={null} onClose={() => setCreating(false)} />}
       </main>
+    </>
+  );
+}
+
+/**
+ * The project cards, grouped by client (collapsible, remembered per browser)
+ * with a search box. The query is kept in `?q=` so it survives navigating back.
+ */
+function HomeProjects({ projects }: { projects: Dashboard["projects"] }) {
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const q = params.get("q") ?? "";
+  const all = useMemo(() => projects.map((p) => p.project), [projects]);
+  const shown = useMemo(() => projects.filter((p) => projectMatcher(q, all)(p.project)), [projects, all, q]);
+  const groups = groupByClient(shown, (p) => p.project);
+  const searching = q.trim() !== "";
+  // Without any clients there's nothing to group by: skip the lone "No client" heading.
+  const flat = groups.length === 1 && groups[0]!.clientId === null;
+
+  const setQuery = (next: string) =>
+    setParams(
+      (prev) => {
+        const out = new URLSearchParams(prev);
+        if (next) out.set("q", next);
+        else out.delete("q");
+        return out;
+      },
+      { replace: true },
+    );
+
+  const tiles = (list: DashboardProject[]) => (
+    <div className="plan-list">
+      {list.map((p) => (
+        <ProjectTile
+          key={p.project.id}
+          p={p}
+          // The group heading already names the client.
+          where={projectLocation(flat ? p.project : { ...p.project, clientName: null }, all)}
+          onOpen={() => navigate(`/projects/${p.project.id}/overview`)}
+        />
+      ))}
+    </div>
+  );
+
+  return (
+    <>
+      <div className="toolbar home-projects-bar">
+        <h3 className="home-heading">Projects</h3>
+        <span className="spacer" />
+        <input
+          type="search"
+          className="search"
+          placeholder="Search projects"
+          aria-label="Search projects by name, client or parent project"
+          value={q}
+          maxLength={200}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+      {!shown.length ? (
+        <div className="muted">No projects match “{q.trim()}”.</div>
+      ) : flat ? (
+        tiles(shown)
+      ) : (
+        groups.map((g) => (
+          <Collapsible
+            key={g.clientId ?? "none"}
+            className="client-group"
+            storageKey={`home.client.${g.clientId ?? "none"}`}
+            title={g.clientName ?? "No client"}
+            meta={`${g.projects.length} project${g.projects.length === 1 ? "" : "s"}`}
+            forceOpen={searching}
+          >
+            {() => tiles(g.projects)}
+          </Collapsible>
+        ))
+      )}
     </>
   );
 }
