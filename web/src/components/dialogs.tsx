@@ -5,6 +5,7 @@ import {
   TEST_STATUS_LABELS,
   ancestors,
   descendantIds,
+  projectSubtreeIds,
   taskCoverage,
   type Comment,
   type Member,
@@ -30,6 +31,7 @@ import {
   usePostComment,
   useMembers,
   useProjectRole,
+  useProjects,
   useSuites,
   useTaskActivity,
   useTasks,
@@ -48,6 +50,7 @@ import { templateSummary } from "./templates.tsx";
 import { SuiteOptions } from "./suites.tsx";
 import { StepsEditor, draftSteps, stepsToSave } from "./testSteps.tsx";
 import { LabelPicker } from "./labels.tsx";
+import { ClientSelect, ParentProjectOptions } from "./projects.tsx";
 import { CommentBody, MarkdownEditor } from "./markdown.tsx";
 import { Modal, Options } from "./ui.tsx";
 
@@ -701,15 +704,33 @@ function TestDialog(props: {
 // ---------------------------------------------------------------------------
 
 /** Edit a project, or create one (optionally from a template; `templateId` preselects it). */
+/**
+ * Create (project = null) or edit a project. A new project can start inside `parentId` (a sub-project, which
+ * takes the parent's client unless `clientId` says otherwise) or with `clientId`.
+ */
 export function ProjectDialog({
   project,
   templateId: initialTemplateId = "",
+  parentId: initialParentId,
+  clientId: initialClientId,
   onClose,
 }: {
   project: Project | null;
   templateId?: string;
+  parentId?: string | null;
+  clientId?: string | null;
   onClose: () => void;
 }) {
+  const projects = useProjects().data ?? [];
+  const initialParent = projects.find((p) => p.id === initialParentId);
+  const [parentId, setParentId] = useState(project ? (project.parentId ?? "") : (initialParentId ?? ""));
+  const [clientId, setClientId] = useState(
+    project ? (project.clientId ?? "") : (initialClientId ?? initialParent?.clientId ?? ""),
+  );
+  // A project can't go inside itself or one of its sub-projects.
+  const exclude = project ? projectSubtreeIds(projects, project.id) : undefined;
+  // Its parent may be a project the viewer isn't a member of; keep it unless they choose another.
+  const hiddenParent = Boolean(project?.parentId && !projects.some((p) => p.id === project.parentId));
   const navigate = useNavigate();
   const create = useCreateProject();
   const templates = useTemplates({ enabled: !project }).data ?? [];
@@ -725,10 +746,25 @@ export function ProjectDialog({
     e.preventDefault();
     try {
       if (project) {
-        await update.mutateAsync({ id: project.id, name, description, notifySubtasksDone });
+        await update.mutateAsync({
+          id: project.id,
+          name,
+          description,
+          notifySubtasksDone,
+          clientId: clientId || null,
+          // Only when changed, so an unchanged parent the viewer can't see isn't re-checked.
+          ...((parentId || null) !== project.parentId ? { parentId: parentId || null } : {}),
+        });
         onClose();
       } else {
-        const p = await create.mutateAsync({ name, description, notifySubtasksDone, templateId: templateId || undefined });
+        const p = await create.mutateAsync({
+          name,
+          description,
+          notifySubtasksDone,
+          templateId: templateId || undefined,
+          parentId: parentId || null,
+          clientId: clientId || null,
+        });
         onClose();
         navigate(`/projects/${p.id}/overview`);
       }
@@ -745,6 +781,20 @@ export function ProjectDialog({
           Name
           <input autoFocus value={name} onChange={(e) => setName(e.target.value)} required />
         </label>
+        <div className="field-row">
+          <label className="field">
+            Inside
+            <select value={parentId} onChange={(e) => setParentId(e.target.value)}>
+              <option value="">Top level</option>
+              {hiddenParent && <option value={project!.parentId!}>A project you're not a member of</option>}
+              <ParentProjectOptions projects={projects} exclude={exclude} />
+            </select>
+          </label>
+          <div className="field">
+            <span id="project-client-label">Client</span>
+            <ClientSelect value={clientId} onChange={setClientId} labelledBy="project-client-label" />
+          </div>
+        </div>
         {!project && (templates.length > 0 || initialTemplateId) && (
           <label className="field">
             Start from

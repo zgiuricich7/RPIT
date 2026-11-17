@@ -39,11 +39,15 @@ await transaction(db, async () => {
   await run(addUser, maya, "demo@rpit.dev", "Maya Chen", pw);
   await run(addUser, priya, "priya@rpit.dev", "Priya Patel", pw);
 
+  // The project is for a client, and has a small sub-project of its own.
+  const client = newId();
+  await run(`INSERT INTO clients (id, name, description) VALUES (?, ?, ?)`, client, "Northwind Traders", "Retail client.");
   await run(
-    `INSERT INTO projects (id, name, description) VALUES (?, ?, ?)`,
+    `INSERT INTO projects (id, name, description, client_id) VALUES (?, ?, ?, ?)`,
     project,
     "Website redesign",
     "Refresh the marketing site and component library.",
+    client,
   );
   const addMember = `INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, ?)`;
   await run(addMember, project, maya, "owner");
@@ -227,6 +231,26 @@ await transaction(db, async () => {
     await run(`INSERT INTO test_plan_items (plan_id, test_case_id) VALUES (?, ?)`, plan, t);
   }
   await testRun(buttonsTest, "passed", priya, "", new Date().toISOString(), plan);
+
+  const sub = newId();
+  await run(
+    `INSERT INTO projects (id, name, description, parent_id, client_id) VALUES (?, ?, ?, ?, ?)`,
+    sub,
+    "Blog migration",
+    "Move the blog onto the new site.",
+    project,
+    client,
+  );
+  await run(addMember, sub, maya, "owner");
+  await createDefaultColumns(db, sub);
+  await run(
+    `INSERT INTO tasks (id, project_id, title, status, column_id, priority, position)
+     SELECT ?, ?, 'Export old posts', 'todo', id, 'medium', 1 FROM board_columns WHERE project_id = ? AND category = 'todo'
+     ORDER BY position LIMIT 1`,
+    newId(),
+    sub,
+    sub,
+  );
 
   // Maya saved the project's structure as a template, shared with everyone.
   await run(

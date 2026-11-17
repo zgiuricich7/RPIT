@@ -2,6 +2,9 @@ import { useEffect } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { hasRole, positionBetween, type ProjectRole } from "@rpit/shared";
 import type {
+  Client,
+  ClientInput,
+  ClientPatch,
   ActivityPage,
   Attachment,
   Dashboard,
@@ -76,6 +79,8 @@ export const keys = {
   dashboard: (today: string) => ["dashboard", today] as const,
   /** Project templates the user can see (their own and shared ones); not project-scoped. */
   templates: ["templates"] as const,
+  /** The shared client list (with counts of the viewer's projects); not project-scoped. */
+  clients: ["clients"] as const,
   /** The signed-in user's inbox; not project-scoped. */
   notifications: ["notifications"] as const,
 };
@@ -165,7 +170,7 @@ export function useCreateProject() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: ProjectInput) => api<Project>("/projects", { method: "POST", body: input }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.projects }),
+    onSuccess: () => invalidateProjectList(qc),
   });
 }
 
@@ -175,7 +180,7 @@ export function useUpdateProject() {
     mutationFn: ({ id, ...patch }: ProjectPatch & { id: string }) =>
       api<Project>(`/projects/${id}`, { method: "PATCH", body: patch }),
     onSuccess: (_p, { id }) => {
-      qc.invalidateQueries({ queryKey: keys.projects });
+      invalidateProjectList(qc);
       invalidateProject(qc, id);
     },
   });
@@ -185,7 +190,51 @@ export function useDeleteProject() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api<void>(`/projects/${id}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: keys.projects }),
+    // Its sub-projects moved up a level.
+    onSuccess: () => invalidateProjectList(qc),
+  });
+}
+
+/** The project list and what's derived from it across projects (client counts, the home dashboard). */
+const invalidateProjectList = (qc: ReturnType<typeof useQueryClient>) => {
+  void qc.invalidateQueries({ queryKey: keys.projects });
+  void qc.invalidateQueries({ queryKey: keys.clients });
+  void qc.invalidateQueries({ queryKey: ["dashboard"] });
+};
+
+// ---------- Clients ----------
+
+export function useClients() {
+  return useQuery({ queryKey: keys.clients, queryFn: () => api<Client[]>("/clients") });
+}
+
+export function useCreateClient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ClientInput) => api<Client>("/clients", { method: "POST", body: input }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.clients }),
+  });
+}
+
+/** Projects show their client's name, so renames refresh them too. */
+export function useUpdateClient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...patch }: ClientPatch & { id: string }) =>
+      api<Client>(`/clients/${id}`, { method: "PATCH", body: patch }),
+    onSuccess: () => invalidateProjectList(qc),
+  });
+}
+
+export function useDeleteClient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<void>(`/clients/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      invalidateProjectList(qc);
+      // Each project that had the client logged the change.
+      void qc.invalidateQueries({ queryKey: ["project"] });
+    },
   });
 }
 

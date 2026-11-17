@@ -7,3 +7,4 @@ export * from "./treeDrag.ts";
 export * from "./filters.ts";
 export * from "./suites.ts";
 export * from "./coverage.ts";
+export * from "./projects.ts";

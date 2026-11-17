@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
+import { flattenProjects } from "@rpit/shared";
 import { useLogout, useMe, useProjects, useUnreadCount } from "../api/hooks.ts";
 import { ProjectDialog } from "./dialogs.tsx";
+import { indent } from "./projects.tsx";
 
 /** App header. Project section links only show when a project is open. */
 export function TopBar({ projectId }: { projectId?: string }) {
@@ -20,6 +22,9 @@ export function TopBar({ projectId }: { projectId?: string }) {
       <NavLink to="/" end className="btn sm home-link">
         Home
       </NavLink>
+      <NavLink to="/clients" className="btn sm home-link">
+        Clients
+      </NavLink>
       <NavLink to="/templates" className="btn sm home-link">
         Templates
       </NavLink>
@@ -29,8 +34,10 @@ export function TopBar({ projectId }: { projectId?: string }) {
         onChange={(e) => e.target.value && navigate(`/projects/${e.target.value}/overview`)}
       >
         {!projectId && <option value="">Choose a project</option>}
-        {projects.map((p) => (
+        {/* Sub-projects indented under their parent. */}
+        {flattenProjects(projects).map(({ project: p, depth }) => (
           <option key={p.id} value={p.id}>
+            {indent(depth)}
             {p.name}
           </option>
         ))}

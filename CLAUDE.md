@@ -34,6 +34,7 @@ shared/   @rpit/shared — zod schemas, enums, labels, response types, tree util
           task filters (filters.ts: TaskFilter, URL parse/params, taskMatcher),
           test suites (suites.ts: suiteTree, suitePath, suiteStats/testStats pass rates, testsInSuite),
           test coverage (coverage.ts: taskCoverage roll-up, coverageState, coverageSummary),
+          sub-project trees (projects.ts: projectTree, flattenProjects, projectAncestors, projectPath),
           Markdown toolbar text transforms (markdown.ts, pure functions with tests).
           Imported as TypeScript source by both server and web (no build step).
 server/   Express 5 API on SQLite (node:sqlite, the default) or Postgres (`pg`, or PGlite in-process)
@@ -56,6 +57,7 @@ server/   Express 5 API on SQLite (node:sqlite, the default) or Postgres (`pg`, 
   src/routes/dashboard.ts  GET /api/dashboard?today= — home page data across the user's projects
   src/templates.ts    project templates: TemplateContent (zod), snapshotProject, applyTemplate
   src/routes/templates.ts  /api/templates — list/save/share/update/delete (user-scoped, owner-only changes)
+  src/routes/clients.ts    /api/clients — the shared client list (any signed-in user manages it)
   test/db.ts          freshDb()/isolatedDb() for tests; RPIT_TEST_DB picks SQLite or PGlite (vitest.config.ts)
   test/api.test.ts    supertest against a fresh DB per test
   test/events.test.ts event stream tests (real listening server + fetch, since supertest buffers)
@@ -75,8 +77,10 @@ web/      React 19 + Vite + TanStack Query + React Router 7
   src/components/suites.tsx       SuiteSidebar (tree + pass rates on the Tests page), SuiteDialog, SuiteOptions
   src/components/coverage.tsx     CoverageBadge (task list), CoveragePill, TaskTests (task dialog's Tests section)
   src/components/templates.tsx  SaveTemplateDialog (overview), TemplateDialog (rename + share), templateSummary
+  src/components/projects.tsx  ParentProjectOptions, ClientSelect (with "New client…"), ProjectBreadcrumb,
+                               projectLocation, ClientDialog
   src/components/labels.tsx    LabelPicker (toggle chips + create) for the task dialog; LabelChip/TaskLabels are in ui.tsx
-  src/pages/          Home (dashboard at /), Templates (/templates), Overview, Tasks (List + Board; filters and sort in the URL), Tests, Plans (list, ?plan=<id> detail), Coverage,
+  src/pages/          Home (dashboard at /), Clients (/clients), Templates (/templates), Overview, Tasks (List + Board; filters and sort in the URL), Tests, Plans (list, ?plan=<id> detail), Coverage,
                       Labels, Members, Inbox, Auth
   src/components/TaskFilters.tsx  search box ("/" focuses it) + assignee/priority/status/label/due filter menus
   src/pages/taskViews.tsx  List and Board views with @dnd-kit drag and drop (mouse, touch, keyboard)
@@ -94,6 +98,15 @@ docs/ROADMAP.md       prioritised backlog
 ## Data model
 
 - `projects` 1─* `tasks`, `test_cases`
+- **Project grouping:** `projects.parent_id → projects.id` (SET NULL) nests projects (sub-projects, unlimited
+  depth); `projects.client_id → clients.id` (SET NULL) assigns one client from `clients(name, description)`, a
+  single shared list (unique `lower(name)`; not project-scoped, so client list changes aren't audited). **Membership
+  stays per project**: nothing is inherited, and a project's parent may be one the viewer can't see (the web treats
+  it as top level; `Project.parentId` is still the real id). Putting a project inside another needs the owner role
+  on it and editor or higher on the parent (`checkParent` in `routes/projects.ts`; non-members of the parent get
+  400, viewers 403); cycles are refused (`wouldCreateProjectCycle`). Deleting a project moves its sub-projects up to
+  its parent; deleting a client unassigns its projects. Moves are logged on both sides: the project's
+  `parentProject` (name) and the parent's `subprojectAdded` / `subprojectRemoved`. Templates don't copy either.
 - `project_members(project_id, user_id, role)` — role is `owner` / `editor` / `viewer` (CHECK + `ProjectRole`
   zod enum). Both FKs cascade. The project creator becomes owner; every project keeps at least one owner.
 - `tasks.parent_id → tasks.id` (nullable, `ON DELETE CASCADE`) gives unlimited nesting.
@@ -264,7 +277,8 @@ docs/ROADMAP.md       prioritised backlog
   tasks when a label is deleted). Task diffs go through `auditedTask(db, task)`, which adds `labels` as the
   joined label names and replaces `status` with the column's name, so history keeps the names as they were
   (entries from before custom columns hold the status key; the feed shows both). New tracked fields
-  go in `TASK_FIELDS` / `TEST_FIELDS` / `PROJECT_FIELDS` / `LABEL_FIELDS` / `COLUMN_FIELDS` / `SUITE_FIELDS` / `PLAN_FIELDS`
+  go in `TASK_FIELDS` / `TEST_FIELDS` / `PROJECT_FIELDS` (project diffs go through `auditedProject`, with the
+  parent project and client as names) / `LABEL_FIELDS` / `COLUMN_FIELDS` / `SUITE_FIELDS` / `PLAN_FIELDS`
   (test status isn't in `TEST_FIELDS`: it's logged as `test_run` entries, which carry `testCaseId` in the diff), plus a label in `web/src/components/activity.tsx`.
   Adding an entity or action type needs a new migration that recreates the CHECK.
 - **Notifications are in-app only** (no email). Create them with `notify` / `notifyAssignment` /

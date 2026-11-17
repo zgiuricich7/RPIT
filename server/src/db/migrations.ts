@@ -586,6 +586,25 @@ export const migrations: string[] = [
   );
   CREATE INDEX idx_template_shares_user ON template_shares(user_id);
   `,
+
+  /* 16: project grouping: clients and sub-projects */ `
+  -- One shared client list (not project-scoped). A project can belong to one client.
+  CREATE TABLE clients (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );
+  CREATE UNIQUE INDEX idx_clients_name ON clients(lower(name));
+
+  -- Projects nest: parent_id is the containing project. Deleting a project moves its sub-projects up a level
+  -- (the route does it; SET NULL is the backstop). Membership stays per project.
+  ALTER TABLE projects ADD COLUMN parent_id TEXT REFERENCES projects(id) ON DELETE SET NULL;
+  ALTER TABLE projects ADD COLUMN client_id TEXT REFERENCES clients(id) ON DELETE SET NULL;
+  CREATE INDEX idx_projects_parent ON projects(parent_id);
+  CREATE INDEX idx_projects_client ON projects(client_id);
+  `,
 ];
 
 /** Timestamps are ISO-8601 text in UTC with milliseconds, like SQLite's strftime('%Y-%m-%dT%H:%M:%fZ','now'). */
@@ -863,5 +882,21 @@ export const pgMigrations: string[] = [
     PRIMARY KEY (template_id, user_id)
   );
   CREATE INDEX idx_template_shares_user ON template_shares(user_id);
+  `,
+
+  /* 3 (SQLite 16): project grouping: clients and sub-projects */ `
+  CREATE TABLE clients (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT ${PG_NOW},
+    updated_at  TEXT NOT NULL DEFAULT ${PG_NOW}
+  );
+  CREATE UNIQUE INDEX idx_clients_name ON clients(lower(name));
+
+  ALTER TABLE projects ADD COLUMN parent_id TEXT REFERENCES projects(id) ON DELETE SET NULL;
+  ALTER TABLE projects ADD COLUMN client_id TEXT REFERENCES clients(id) ON DELETE SET NULL;
+  CREATE INDEX idx_projects_parent ON projects(parent_id);
+  CREATE INDEX idx_projects_client ON projects(client_id);
   `,
 ];

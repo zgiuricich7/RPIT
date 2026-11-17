@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { PROJECT_ROLE_LABELS, isOverdue, type DashboardProject } from "@rpit/shared";
 import { useDashboard, useMe } from "../api/hooks.ts";
 import { ProjectDialog } from "../components/dialogs.tsx";
+import { projectLocation } from "../components/projects.tsx";
 import { TopBar } from "../components/TopBar.tsx";
 import { DueDate, Meter, TestStatusPill, useToday } from "../components/ui.tsx";
 import { formatDateTime } from "../lib/format.ts";
@@ -108,7 +109,12 @@ export function HomePage() {
             <h3 className="home-heading">Projects</h3>
             <div className="plan-list">
               {data.projects.map((p) => (
-                <ProjectTile key={p.project.id} p={p} onOpen={() => navigate(`/projects/${p.project.id}/overview`)} />
+                <ProjectTile
+                  key={p.project.id}
+                  p={p}
+                  where={projectLocation(p.project, data.projects.map((x) => x.project))}
+                  onOpen={() => navigate(`/projects/${p.project.id}/overview`)}
+                />
               ))}
             </div>
           </>
@@ -119,13 +125,15 @@ export function HomePage() {
   );
 }
 
-function ProjectTile({ p, onOpen }: { p: DashboardProject; onOpen: () => void }) {
+/** `where`: the project's client and parent path ("Acme · Website"), if any. */
+function ProjectTile({ p, where, onOpen }: { p: DashboardProject; where: string; onOpen: () => void }) {
   const { project, summary } = p;
   return (
     <button className="panel plan-card" onClick={onOpen}>
       <h3>
         {project.name} <span className="plan-state closed">{PROJECT_ROLE_LABELS[project.role]}</span>
       </h3>
+      {where && <span className="muted project-where">{where}</span>}
       {summary.leafCount > 0 ? (
         <Meter done={summary.leafDoneCount} total={summary.leafCount} />
       ) : (

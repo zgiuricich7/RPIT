@@ -77,6 +77,7 @@ input, select, textarea {
 }
 select.inline { width: auto; }
 label.field, div.field { display: grid; gap: 4px; font-size: 12px; color: var(--mute); }
+.field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
 label.check { display: flex; align-items: center; gap: 6px; color: var(--mute); }
 label.check input { width: auto; }
 .form-error { color: var(--fail); font-size: 13px; }
@@ -187,6 +188,17 @@ main.home .panel { min-width: 0; }
 .crumb-inline { font-size: 11px; color: var(--mute); display: block; }
 
 /* ---------- Test plans ---------- */
+/* ---------- Project grouping (clients, sub-projects) ---------- */
+.client-list { display: grid; gap: 14px; margin-bottom: 14px; }
+.client-card { scroll-margin-top: 70px; }
+.client-card .toolbar { margin-bottom: 8px; }
+.client-card h3 { margin: 0; }
+a.title-btn { text-decoration: none; }
+.project-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 12px; margin-bottom: 4px; }
+.project-crumbs a { color: var(--mute); }
+.project-crumbs a:hover { color: var(--ink); }
+.client-chip { padding: 0 7px; border: 1px solid var(--line); border-radius: 99px; text-decoration: none; }
+.project-where { font-size: 12px; }
 .plan-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
 .plan-card { text-align: left; font: inherit; color: inherit; cursor: pointer; display: grid; gap: 8px; }
 .plan-card h3 { margin: 0; display: flex; gap: 8px; align-items: center; }

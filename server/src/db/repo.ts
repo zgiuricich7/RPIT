@@ -2,6 +2,7 @@ import type {
   Activity,
   Attachment,
   BoardColumn,
+  Client,
   Comment,
   CommentMention,
   Label,
@@ -66,12 +67,15 @@ export const toUser = (r: Row): User => ({
   email: r.email as string,
 });
 
-/** Expects the row to include the viewer's `role` (see PROJECT_SELECT). */
+/** Expects the row to include the viewer's `role` and `client_name` (see PROJECT_SELECT). */
 export const toProject = (r: Row): Project => ({
   id: r.id as string,
   name: r.name as string,
   description: r.description as string,
   notifySubtasksDone: Boolean(r.notify_subtasks_done),
+  parentId: (r.parent_id as string | null) ?? null,
+  clientId: (r.client_id as string | null) ?? null,
+  clientName: (r.client_name as string | null) ?? null,
   role: r.role as ProjectRole,
   createdAt: r.created_at as string,
   updatedAt: r.updated_at as string,
@@ -97,6 +101,16 @@ export const toTemplate = (r: Row, viewerId: string, counts: TemplateCounts, sha
     updatedAt: r.updated_at as string,
   };
 };
+
+/** Expects `project_count`: the client's projects the viewer is a member of. */
+export const toClient = (r: Row): Client => ({
+  id: r.id as string,
+  name: r.name as string,
+  description: r.description as string,
+  projectCount: Number(r.project_count ?? 0),
+  createdAt: r.created_at as string,
+  updatedAt: r.updated_at as string,
+});
 
 export const toMember = (r: Row): Member => ({
   projectId: r.project_id as string,
@@ -284,8 +298,9 @@ export const NOTIFICATION_SELECT = `
 
 /** Projects joined with the viewer's membership; bind the user id first. */
 export const PROJECT_SELECT = `
-  SELECT p.*, m.role
-  FROM projects p JOIN project_members m ON m.project_id = p.id AND m.user_id = ?`;
+  SELECT p.*, m.role, c.name AS client_name
+  FROM projects p JOIN project_members m ON m.project_id = p.id AND m.user_id = ?
+  LEFT JOIN clients c ON c.id = p.client_id`;
 
 export const MEMBER_SELECT = `
   SELECT m.*, u.name, u.email
@@ -356,6 +371,19 @@ export async function wouldCreateCycle(db: DB, taskId: string, candidateParentId
      )
      SELECT 1 AS hit FROM sub WHERE id = ? LIMIT 1`,
     taskId,
+    candidateParentId,
+  );
+  return Boolean(row);
+}
+
+/** Would putting `projectId` under `candidateParentId` make a project its own ancestor? */
+export async function wouldCreateProjectCycle(db: DB, projectId: string, candidateParentId: string): Promise<boolean> {
+  const row = await db.get(
+    `WITH RECURSIVE sub(id) AS (
+       SELECT CAST(? AS TEXT) UNION ALL SELECT p.id FROM projects p JOIN sub ON p.parent_id = sub.id
+     )
+     SELECT 1 AS hit FROM sub WHERE id = ? LIMIT 1`,
+    projectId,
     candidateParentId,
   );
   return Boolean(row);

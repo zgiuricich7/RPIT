@@ -59,7 +59,33 @@ export const TEST_FIELDS = ["title", "suiteId", "priority", "assigneeId", "taskI
 export const SUITE_FIELDS = ["name", "description", "parentId"] as const;
 export const PLAN_FIELDS = ["name", "description", "dueDate", "closedAt"] as const;
 export const TEST_RUN_FIELDS = ["status", "notes", "testCaseId"] as const;
-export const PROJECT_FIELDS = ["name", "description", "notifySubtasksDone"] as const;
+export const PROJECT_FIELDS = ["name", "description", "notifySubtasksDone", "parentProject", "client"] as const;
+
+/**
+ * A project as the log sees it: the containing project and client as names (null for none), so entries keep
+ * them as they were. The parent's own log records the move too (`subprojectAdded` / `subprojectRemoved`).
+ */
+export interface AuditedProject {
+  name: string;
+  description: string;
+  notifySubtasksDone: boolean;
+  parentProject: string | null;
+  client: string | null;
+}
+export async function auditedProject(
+  db: DB,
+  p: { name: string; description: string; notifySubtasksDone: boolean; parentId: string | null; clientId: string | null },
+): Promise<AuditedProject> {
+  const parent = p.parentId ? await db.get<{ name: string }>(`SELECT name FROM projects WHERE id = ?`, p.parentId) : undefined;
+  const client = p.clientId ? await db.get<{ name: string }>(`SELECT name FROM clients WHERE id = ?`, p.clientId) : undefined;
+  return {
+    name: p.name,
+    description: p.description,
+    notifySubtasksDone: p.notifySubtasksDone,
+    parentProject: parent?.name ?? null,
+    client: client?.name ?? null,
+  };
+}
 export const LABEL_FIELDS = ["name", "color"] as const;
 export const COLUMN_FIELDS = ["name", "category"] as const;
 

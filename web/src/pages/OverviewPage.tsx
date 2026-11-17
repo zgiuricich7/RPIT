@@ -8,6 +8,8 @@ import {
   buildTree,
   compareTasks,
   coverageSummary,
+  flattenProjects,
+  projectSubtreeIds,
   isOverdue,
   leafProgress,
   taskCoverage,
@@ -29,6 +31,8 @@ import { ProjectDialog, useDialogs } from "../components/dialogs.tsx";
 import { ActivityFeed } from "../components/activity.tsx";
 import { Attachments } from "../components/attachments.tsx";
 import { SaveTemplateDialog } from "../components/templates.tsx";
+import { ProjectBreadcrumb } from "../components/projects.tsx";
+import { ProjectRow } from "./ClientsPage.tsx";
 import { CommentBody, MarkdownView } from "../components/markdown.tsx";
 import { DueDate, Meter, Stack, TaskStatusPill, TestStatusPill, useToday } from "../components/ui.tsx";
 import { formatDateTime } from "../lib/format.ts";
@@ -58,6 +62,14 @@ export function OverviewPage() {
   const activity = useProjectActivity(project.id);
   const [editing, setEditing] = useState(false);
   const [savingTemplate, setSavingTemplate] = useState(false);
+  const [newSubproject, setNewSubproject] = useState(false);
+  // Sub-projects the viewer is a member of, nested; others stay hidden (membership is per project).
+  const subprojects = useMemo(() => {
+    const ids = projectSubtreeIds(projects, project.id);
+    const below = projects.filter((p) => p.id !== project.id && ids.has(p.id));
+    // Direct sub-projects are the roots of this list.
+    return flattenProjects(below.map((p) => (p.parentId === project.id ? { ...p, parentId: null } : p)));
+  }, [projects, project.id]);
   const today = useToday();
 
   const top = buildTree(tasks);
@@ -75,7 +87,8 @@ export function OverviewPage() {
       alert("Keep at least one project. Create another one before deleting this one.");
       return;
     }
-    if (!confirm(`Delete "${project.name}" with all its tasks, comments and test cases?`)) return;
+    const subs = " Its sub-projects aren't deleted: they move up a level.";
+    if (!confirm(`Delete "${project.name}" with all its tasks, comments and test cases?${subs}`)) return;
     await del.mutateAsync(project.id);
     navigate("/");
   }
@@ -89,9 +102,15 @@ export function OverviewPage() {
 
   return (
     <>
+      <ProjectBreadcrumb project={project} projects={projects} />
       <div className="toolbar">
         <h2>{project.name}</h2>
         <span className="spacer" />
+        {project.role !== "viewer" && (
+          <button className="btn sm" onClick={() => setNewSubproject(true)}>
+            New sub-project
+          </button>
+        )}
         {project.role === "owner" && (
           <>
             <button className="btn sm" onClick={() => setEditing(true)}>
@@ -221,6 +240,15 @@ export function OverviewPage() {
         </div>
       </div>
 
+      {subprojects.length > 0 && (
+        <div className="panel">
+          <h3>Sub-projects</h3>
+          {subprojects.map(({ project: p, depth }) => (
+            <ProjectRow key={p.id} project={p} depth={depth} />
+          ))}
+        </div>
+      )}
+
       {openPlans.length > 0 && (
         <div className="panel">
           <h3>Open test plans</h3>
@@ -254,6 +282,7 @@ export function OverviewPage() {
 
       {editing && <ProjectDialog project={project} onClose={() => setEditing(false)} />}
       {savingTemplate && <SaveTemplateDialog project={project} onClose={() => setSavingTemplate(false)} />}
+      {newSubproject && <ProjectDialog project={null} parentId={project.id} onClose={() => setNewSubproject(false)} />}
     </>
   );
 }

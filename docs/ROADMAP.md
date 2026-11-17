@@ -98,9 +98,15 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
     has a Tests section with "Add test case" (pre-linked to the task).
     Follow-up: link a test to more than one task, coverage on the board cards, and a coverage trend over time.
 3.6 **Import results** from CI (JUnit XML) via an API token.
-3.7 **Project Grouping** group projects togehter into larger groups / folders. Clients can be set up to have 
-multiple projects assigned to them. Projects should be able to nest within each other, so a project can contain
-other projects as a hierarchy.
+3.7 ~~**Project grouping**~~ Done: projects nest (a project can sit inside another, any depth) and can belong to
+    a client. Clients are one shared list (Clients page in the header: add, rename, delete, start a project for a
+    client), and each client card lists your projects for it as a tree. Project overviews show a breadcrumb
+    (client / parent projects), their sub-projects with progress, and "New sub-project" for editors; the project
+    switcher and home tiles show the hierarchy. Membership stays per project: you only see sub-projects you're a
+    member of, and filing a project under another needs editor access there. Deleting a project moves its
+    sub-projects up a level; deleting a client keeps its projects. Every move is logged on both projects.
+    Follow-up: roll-up progress across a project and its sub-projects, inherited membership (optional per
+    parent), filtering the home dashboard by client, and moving projects by drag and drop.
 
 ## 4. Dashboard
 

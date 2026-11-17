@@ -1932,6 +1932,127 @@ describe("project templates", () => {
   });
 });
 
+describe("project grouping (sub-projects and clients)", () => {
+  type Entry = { entity: string; action: string; label: string; diff: Record<string, { from: unknown; to: unknown }> };
+  const feed = async (projectId: string, agent = ctx.agent) =>
+    (await agent.get(`/api/projects/${projectId}/activity`).expect(200)).body.items as Entry[];
+  const mk = async (name: string, body: Record<string, unknown> = {}, agent = ctx.agent) =>
+    (await agent.post("/api/projects").send({ name, ...body }).expect(201)).body as { id: string; parentId: string | null };
+
+  it("nests projects, logs moves on both sides and refuses cycles", async () => {
+    const { agent, projectId } = ctx;
+    const web = await mk("Website", { parentId: projectId });
+    expect(web.parentId).toBe(projectId);
+    const checkout = await mk("Checkout", { parentId: web.id });
+
+    // The parent's log records the new sub-project; the child's creation names its parent.
+    expect((await feed(projectId))[0]).toMatchObject({ action: "updated", diff: { subprojectAdded: { from: null, to: "Website" } } });
+    const created = (await feed(web.id)).find((e) => e.entity === "project" && e.action === "created")!;
+    expect(created.diff.parentProject).toEqual({ from: null, to: "P1" });
+
+    const cycle = await agent.patch(`/api/projects/${projectId}`).send({ parentId: checkout.id }).expect(400);
+    expect(cycle.body.fieldErrors.parentId).toBeDefined();
+    await agent.patch(`/api/projects/${projectId}`).send({ parentId: projectId }).expect(400);
+    await agent.post("/api/projects").send({ name: "X", parentId: "nope" }).expect(400);
+
+    // Moving to the top level logs on the project and on its old parent.
+    const moved = (await agent.patch(`/api/projects/${checkout.id}`).send({ parentId: null }).expect(200)).body;
+    expect(moved.parentId).toBeNull();
+    expect((await feed(checkout.id))[0]!.diff.parentProject).toEqual({ from: "Website", to: null });
+    expect((await feed(web.id))[0]!.diff.subprojectRemoved).toEqual({ from: "Checkout", to: null });
+    // Unrelated patches don't touch the parent.
+    await agent.patch(`/api/projects/${web.id}`).send({ name: "Web" }).expect(200);
+    expect((await agent.get(`/api/projects/${web.id}`).expect(200)).body.parentId).toBe(projectId);
+  });
+
+  it("keeps membership per project: a parent needs editor access, and sub-projects stay private", async () => {
+    const { db, agent, projectId } = ctx;
+    const bea = await signUp(db, "Bea", "bea@x.com");
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "bea@x.com", role: "viewer" }).expect(201);
+    // A viewer can't file projects under P1, and someone outside it can't either.
+    const denied = await bea.post("/api/projects").send({ name: "Mine", parentId: projectId }).expect(403);
+    expect(denied.body.fieldErrors.parentId).toBeDefined();
+    const outsider = await signUp(db, "Cal", "cal@x.com");
+    await outsider.post("/api/projects").send({ name: "Cal's", parentId: projectId }).expect(400);
+
+    // Bea sees P1 but not its sub-project, which she isn't a member of.
+    const secret = await mk("Secret", { parentId: projectId });
+    const beasProjects = (await bea.get("/api/projects").expect(200)).body as { id: string }[];
+    expect(beasProjects.map((p) => p.id)).toEqual([projectId]);
+    await bea.get(`/api/projects/${secret.id}`).expect(404);
+
+    // As an editor of P1 she can file her own project under it.
+    await agent.patch(`/api/projects/${projectId}/members/${(await bea.get("/api/auth/me")).body.id}`).send({ role: "editor" }).expect(200);
+    const hers = await mk("Hers", { parentId: projectId }, bea);
+    expect(hers.parentId).toBe(projectId);
+  });
+
+  it("deleting a project moves its sub-projects up a level instead of deleting them", async () => {
+    const { agent, projectId } = ctx;
+    const mid = await mk("Mid", { parentId: projectId });
+    const leafA = await mk("Leaf A", { parentId: mid.id });
+    const leafB = await mk("Leaf B", { parentId: mid.id });
+    await agent.delete(`/api/projects/${mid.id}`).expect(204);
+
+    for (const leaf of [leafA, leafB]) {
+      expect((await agent.get(`/api/projects/${leaf.id}`).expect(200)).body.parentId).toBe(projectId);
+      expect((await feed(leaf.id))[0]!.diff.parentProject).toEqual({ from: "Mid", to: "P1" });
+    }
+    const parentLog = (await feed(projectId)).slice(0, 3).map((e) => e.diff);
+    expect(parentLog).toEqual(
+      expect.arrayContaining([
+        { subprojectRemoved: { from: "Mid", to: null } },
+        { subprojectAdded: { from: null, to: "Leaf A" } },
+        { subprojectAdded: { from: null, to: "Leaf B" } },
+      ]),
+    );
+    // A top-level project's sub-projects become top level.
+    const child = await mk("Child", { parentId: leafA.id });
+    await agent.delete(`/api/projects/${leafA.id}`).expect(204);
+    expect((await agent.get(`/api/projects/${child.id}`).expect(200)).body.parentId).toBe(projectId);
+  });
+
+  it("manages a shared client list and assigns clients to projects", async () => {
+    const { db, agent, projectId } = ctx;
+    const acme = (await agent.post("/api/clients").send({ name: "Acme" }).expect(201)).body;
+    expect(acme).toMatchObject({ name: "Acme", description: "", projectCount: 0 });
+    const dup = await agent.post("/api/clients").send({ name: "ACME" }).expect(409);
+    expect(dup.body.fieldErrors.name).toBeDefined();
+    await agent.post("/api/clients").send({ name: " " }).expect(400);
+
+    const p = (await agent.patch(`/api/projects/${projectId}`).send({ clientId: acme.id }).expect(200)).body;
+    expect(p).toMatchObject({ clientId: acme.id, clientName: "Acme" });
+    expect((await feed(projectId))[0]!.diff.client).toEqual({ from: null, to: "Acme" });
+    await agent.patch(`/api/projects/${projectId}`).send({ clientId: "nope" }).expect(400);
+    await mk("Second", { clientId: acme.id });
+
+    // Everyone sees the client list; counts only include projects you're a member of.
+    const bea = await signUp(db, "Bea", "bea@x.com");
+    expect((await agent.get("/api/clients").expect(200)).body).toEqual([expect.objectContaining({ id: acme.id, projectCount: 2 })]);
+    expect((await bea.get("/api/clients").expect(200)).body).toEqual([expect.objectContaining({ id: acme.id, projectCount: 0 })]);
+    // Anyone can rename a client; projects show the new name.
+    await bea.patch(`/api/clients/${acme.id}`).send({ name: "Acme Corp", description: "Retail" }).expect(200);
+    expect((await agent.get(`/api/projects/${projectId}`)).body.clientName).toBe("Acme Corp");
+    await bea.patch(`/api/clients/${acme.id}`).send({ name: "acme corp" }).expect(200); // its own name, new case
+
+    // Assigning a client is a project change: owners only.
+    await agent.post(`/api/projects/${projectId}/members`).send({ email: "bea@x.com", role: "editor" }).expect(201);
+    await bea.patch(`/api/projects/${projectId}`).send({ clientId: null }).expect(403);
+
+    // Deleting the client keeps its projects and logs the unassignment on each.
+    await agent.delete(`/api/clients/${acme.id}`).expect(204);
+    await agent.get(`/api/clients/${acme.id}`).expect(404);
+    const after = (await agent.get(`/api/projects/${projectId}`)).body;
+    expect(after).toMatchObject({ clientId: null, clientName: null });
+    expect((await feed(projectId))[0]!.diff.client).toEqual({ from: "acme corp", to: null });
+  });
+
+  it("needs a session for clients", async () => {
+    const db = await isolatedDb();
+    await request(createApp(db)).get("/api/clients").expect(401);
+  });
+});
+
 describe.skipIf(onSqlite)("Postgres schema", () => {
   it("has the same tables and columns as SQLite after all migrations", async () => {
     const { DatabaseSync } = await import("node:sqlite");

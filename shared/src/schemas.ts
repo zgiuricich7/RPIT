@@ -89,6 +89,9 @@ export const ProjectInput = z.object({
   notifySubtasksDone: z.boolean().default(true),
   /** Start from this project template (one you can see): its columns, labels, tasks, suites, tests and plans. */
   templateId: id.optional(),
+  /** The containing project (null for top level). Needs the editor role there. */
+  parentId: nullableId.default(null),
+  clientId: nullableId.default(null),
 });
 /**
  * Patch schemas must not carry defaults: zod still applies `.default()` inside
@@ -99,10 +102,21 @@ export const ProjectPatch = z
     name: z.string().trim().min(1, "Name is required").max(120),
     description: longText,
     notifySubtasksDone: z.boolean(),
+    /** Move under another project (editor role there), or null for top level. */
+    parentId: nullableId,
+    clientId: nullableId,
   })
   .partial();
 export type ProjectInput = z.input<typeof ProjectInput>;
 export type ProjectPatch = z.infer<typeof ProjectPatch>;
+
+// ---------- Clients ----------
+/** One shared list of clients; a project can belong to one. Any signed-in user manages the list. */
+const clientName = z.string().trim().min(1, "Name is required").max(120);
+export const ClientInput = z.object({ name: clientName, description: longText.default("") });
+export const ClientPatch = z.object({ name: clientName, description: longText }).partial();
+export type ClientInput = z.input<typeof ClientInput>;
+export type ClientPatch = z.infer<typeof ClientPatch>;
 
 // ---------- Project templates ----------
 /**
@@ -423,8 +437,25 @@ export interface Project {
   description: string;
   /** Prompt a parent task's assignee to mark it done when all its subtasks are done. */
   notifySubtasksDone: boolean;
+  /**
+   * The containing project, or null at the top level. Membership is per project, so the parent may be one
+   * the viewer can't see: treat the project as top level then.
+   */
+  parentId: string | null;
+  clientId: string | null;
+  clientName: string | null;
   /** The signed-in user's role in this project. */
   role: ProjectRole;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Client {
+  id: string;
+  name: string;
+  description: string;
+  /** Projects of this client that the viewer is a member of. */
+  projectCount: number;
   createdAt: string;
   updatedAt: string;
 }

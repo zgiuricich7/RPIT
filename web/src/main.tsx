@@ -15,6 +15,7 @@ import { CoveragePage } from "./pages/CoveragePage.tsx";
 import { TasksPage } from "./pages/TasksPage.tsx";
 import { TestsPage } from "./pages/TestsPage.tsx";
 import { TemplatesPage } from "./pages/TemplatesPage.tsx";
+import { ClientsPage } from "./pages/ClientsPage.tsx";
 import "./styles.css";
 
 const queryClient = new QueryClient({
@@ -39,6 +40,7 @@ function App() {
       <Route path="/" element={<HomePage />} />
       <Route path="/inbox" element={<InboxPage />} />
       <Route path="/templates" element={<TemplatesPage />} />
+      <Route path="/clients" element={<ClientsPage />} />
       <Route path="/projects/:projectId" element={<ProjectLayout />}>
         <Route index element={<Navigate to="overview" replace />} />
         <Route path="overview" element={<OverviewPage />} />

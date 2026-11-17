@@ -42,6 +42,8 @@ const FIELD_LABELS: Record<string, string> = {
   labels: "Labels",
   notifySubtasksDone: "Prompt when subtasks are done",
   template: "Template",
+  parentProject: "Inside",
+  client: "Client",
   category: "Counts as",
   suiteId: "Suite",
   color: "Colour",
@@ -74,6 +76,8 @@ function formatValue(a: Activity, field: string, v: FieldChange["from"], l: Look
   if (field === "startDate" || field === "dueDate") return v ? formatDate(String(v)) : "None";
   if (field === "remindAssignee" || field === "notifySubtasksDone") return v ? "On" : "Off";
   if (field === "labels") return v ? String(v) : "None";
+  if (field === "parentProject") return v ? String(v) : "Top level";
+  if (field === "client") return v ? String(v) : "No client";
   if (field === "color") return LABEL_COLOR_LABELS[v as LabelColor] ?? String(v);
   if (v === null || v === "") return "empty";
   if (field === "status") {
@@ -148,6 +152,10 @@ function Sentence({ a, scope, lookup }: { a: Activity; scope: ActivityScope; loo
 
   switch (a.entity) {
     case "project":
+      if (a.action === "updated" && a.diff.subprojectAdded) return <>added the sub-project <b>{String(a.diff.subprojectAdded.to)}</b></>;
+      if (a.action === "updated" && a.diff.subprojectRemoved) {
+        return <>removed the sub-project <b>{String(a.diff.subprojectRemoved.from)}</b></>;
+      }
       return <>{verb} the project {a.action === "deleted" ? <b>{a.label}</b> : null}</>;
     case "member": {
       const role = (r: FieldChange["from"]) => PROJECT_ROLE_LABELS[r as ProjectRole]?.toLowerCase() ?? "member";
