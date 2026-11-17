@@ -39,6 +39,7 @@ and test case tracking — with a per-project overview dashboard.
 - **Overview** per project: completion, task and test status breakdowns, items needing attention,
   recent comments, and a comparison across all projects
 - Email/password accounts with cookie sessions; light and dark themes; responsive layout
+- **Desktop app** (Electron) for Windows, macOS and Linux that runs RPIT locally, with its data on your computer
 
 ## Quick start
 
@@ -67,6 +68,23 @@ DATABASE_URL=pglite:./server/data/pg npm run dev    # embedded Postgres in a fol
 `npm test` runs the API tests against both SQLite and Postgres (via PGlite), so no Postgres install is needed
 to test. Existing SQLite data isn't copied over automatically; a new Postgres database starts empty.
 
+## Desktop app
+
+The `desktop/` workspace wraps RPIT in an Electron window. The API server runs inside the app (in an Electron
+utility process, listening only on `127.0.0.1` on a free port) and the window loads the web app from it, so
+everything works as in the browser. Data lives in a per-user folder: the SQLite database and attachments in
+`data/`, and the server log in `logs/server.log`, under `%APPDATA%\RPIT` (Windows),
+`~/Library/Application Support/RPIT` (macOS) or `~/.config/RPIT` (Linux). File → Open data folder shows it.
+
+```bash
+npm run desktop           # build the web app and desktop bundle, then open the app
+npm run package:desktop   # installer for the current OS in desktop/release (NSIS .exe, .dmg or AppImage)
+npm run smoke -w desktop  # after a build: start the app headless, sign up, check the session, quit
+```
+
+The first start has an empty database: create an account in the app. `RPIT_DATA_DIR` moves the data folder.
+Installers are unsigned and use the default Electron icon; build each OS's installer on that OS.
+
 ## Production
 
 ```bash
@@ -79,6 +97,7 @@ Configuration (environment variables, or a `.env` file in the repo root — see 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `3001` | HTTP port |
+| `HOST` | all interfaces | Interface to listen on, e.g. `127.0.0.1` for this machine only |
 | `DATABASE_URL` | unset | Use Postgres: `postgres://user:pass@host:5432/db`, or `pglite:<folder>` for embedded Postgres (no server). Unset means SQLite |
 | `DATABASE_PATH` | `server/data/rpit.db` | SQLite file location (when `DATABASE_URL` is unset) |
 | `SESSION_DAYS` | `30` | Session cookie lifetime |
@@ -87,7 +106,7 @@ Configuration (environment variables, or a `.env` file in the repo root — see 
 ## Tech stack
 
 TypeScript everywhere · React 19, Vite, TanStack Query, React Router · Express 5 · SQLite via
-built-in node:sqlite · zod schemas shared between client and server · Vitest + Supertest.
+built-in node:sqlite · zod schemas shared between client and server · Vitest + Supertest · Electron (desktop).
 
 ## Working on it with Claude Code
 

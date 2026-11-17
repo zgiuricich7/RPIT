@@ -1,0 +1,50 @@
+{
+  "name": "@rpit/desktop",
+  "productName": "RPIT",
+  "version": "0.1.0",
+  "private": true,
+  "description": "RPIT desktop app: the web app and its API server in one Electron window, with a local SQLite database.",
+  "author": "RPIT",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\" && tsup",
+    "start": "node scripts/electron.mjs",
+    "smoke": "node scripts/electron.mjs --smoke",
+    "package": "electron-builder --dir",
+    "dist": "electron-builder",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "electron": "45.3.3",
+    "electron-builder": "^26.18.0",
+    "tsup": "^9.0.0"
+  },
+  "build": {
+    "appId": "dev.rpit.desktop",
+    "productName": "RPIT",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "!dist/**/*.map",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Office"
+    }
+  }
+}

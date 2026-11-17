@@ -16,6 +16,8 @@ const databaseUrl = process.env.DATABASE_URL || databasePath;
 
 export const config = {
   port: Number(process.env.PORT ?? 3001),
+  /** Interface to listen on; unset means every interface. The desktop app uses 127.0.0.1. */
+  host: process.env.HOST || undefined,
   databasePath,
   databaseUrl,
   /** For logs: the URL without its password. */
@@ -24,5 +26,6 @@ export const config = {
   sessionDays: Number(process.env.SESSION_DAYS ?? 30),
   /** Attachment files. Defaults to an "uploads" folder next to the database. */
   uploadsDir: process.env.UPLOADS_DIR ?? path.join(path.dirname(databasePath), "uploads"),
-  webDist: path.join(REPO_ROOT, "web", "dist"),
+  /** The built web app served in production (the desktop app ships its own copy). */
+  webDist: process.env.WEB_DIST ?? path.join(REPO_ROOT, "web", "dist"),
 };

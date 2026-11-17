@@ -98,6 +98,9 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
     has a Tests section with "Add test case" (pre-linked to the task).
     Follow-up: link a test to more than one task, coverage on the board cards, and a coverage trend over time.
 3.6 **Import results** from CI (JUnit XML) via an API token.
+3.7 **Project Grouping** group projects togehter into larger groups / folders. Clients can be set up to have 
+multiple projects assigned to them. Projects should be able to nest within each other, so a project can contain
+other projects as a hierarchy.
 
 ## 4. Dashboard
 
@@ -134,3 +137,13 @@ for example: "Implement roadmap item 1.2 following CLAUDE.md conventions."
     dates (e.g. "due 2 weeks after the project starts"), and default assignees by role.
 5.9 **JIRA Integration**: Allow for tie in integration with JIRA to create new projects from a JIRA ticket.
     Pull in the description, assignee, and comment history, as well as metadata about the ticket.
+
+## 6. Desktop Support
+6.1 ~~**Desktop architecture**~~ Done: an Electron app (`desktop/` workspace) for Windows, macOS and Linux. It
+    runs the bundled API server in an Electron utility process on `127.0.0.1` (free port) with a SQLite database
+    and uploads in the user's app-data folder, and loads the normal web app from it in a sandboxed window (links
+    to other sites open in the browser). One instance at a time; the server closes the database before the app
+    quits. `npm run desktop` runs it, `npm run package:desktop` builds an installer (electron-builder), and
+    `npm run smoke -w desktop` checks a build end to end.
+    Follow-up: app icon and code signing, auto-update, desktop notifications for the inbox, connecting the app to a
+    shared team server instead of the local one, and running the smoke test in CI (5.7).

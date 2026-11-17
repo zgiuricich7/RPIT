@@ -1,5 +1,6 @@
 node_modules/
 dist/
+desktop/release/
 server/data/
 *.db
 *.db-shm

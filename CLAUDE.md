@@ -19,6 +19,9 @@ Run from the repo root.
 | `npm run typecheck` | `tsc` across all three workspaces |
 | `npm run build` | Build web to `web/dist`, bundle server to `server/dist` |
 | `NODE_ENV=production npm start` | Serve API and built web app together on :3001 |
+| `npm run desktop` | Build web + desktop bundle and open the Electron app |
+| `npm run package:desktop` | Installer for the current OS in `desktop/release` |
+| `npm run smoke -w desktop` | After a desktop build: headless start, sign up, check session, quit (exit 0/1) |
 
 Always run `npm run typecheck && npm test` before considering a change done.
 
@@ -78,6 +81,13 @@ web/      React 19 + Vite + TanStack Query + React Router 7
   src/components/TaskFilters.tsx  search box ("/" focuses it) + assignee/priority/status/label/due filter menus
   src/pages/taskViews.tsx  List and Board views with @dnd-kit drag and drop (mouse, touch, keyboard)
   src/styles.css      design tokens (light/dark) and all styles; plain CSS, no framework
+desktop/  Electron app (Windows/macOS/Linux) wrapping the server + web app
+  src/main.ts         main process: starts the server in a utility process (HOST=127.0.0.1, PORT=0, SQLite and
+                      uploads under <userData>/data, WEB_DIST=dist/web), waits for its "ready" message, opens a
+                      sandboxed window on it; off-origin links open in the browser; "shutdown" message on quit
+  tsup.config.ts      bundles main.ts, and the server with all deps (except the lazily loaded pg/PGlite) into
+                      dist/server; copies web/dist to dist/web. electron-builder config is in package.json
+  scripts/electron.mjs  launches Electron (clears ELECTRON_RUN_AS_NODE, which VS Code terminals set); --smoke
 docs/ROADMAP.md       prioritised backlog
 ```
 
@@ -285,6 +295,12 @@ docs/ROADMAP.md       prioritised backlog
 1. Schema/types in `shared` → 2. migration if the DB changes → 3. mapper + route in `server`
 4. API test in `server/test` → 5. hook in `web/src/api/hooks.ts` → 6. UI → 7. typecheck + test.
 
+- **The desktop app is the same server and web app**, not a fork: don't add desktop-only behaviour to `web/`.
+  The server only knows about Electron in `index.ts` (`process.parentPort`: posts `{ type: "ready", port }`,
+  handles `"shutdown"`). The server bundle must stay free of native modules (it runs on Electron's Node:
+  `node:sqlite` is built in). The Electron version is pinned exactly (electron-builder needs it, and
+  `allowScripts` in the root package.json names that version so its binary download runs); bump both together.
+
 ## Known limitations (see docs/ROADMAP.md)
 
 - Invites only work for existing accounts (no pending invites or invite emails yet).
@@ -294,6 +310,8 @@ docs/ROADMAP.md       prioritised backlog
   The inbox still polls for notifications from projects that aren't open, and the home dashboard (which spans
   projects) refetches when opened and every minute.
 - Notifications are not emailed.
+- Desktop installers are unsigned with the default Electron icon, have no auto-update, and always use their own
+  local database (they can't connect to a shared team server yet).
 - The activity log covers project-scoped actions only: sign-ins, sign-ups and inbox read state aren't logged.
   Rows for deleted projects are kept but no API exposes them.
 - Keyboard drag and drop reorders but can't nest or un-nest in the list (use the task dialog's parent picker).
